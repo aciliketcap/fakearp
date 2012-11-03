@@ -33,7 +33,7 @@
  * We're lying and we should be consistent.
  * Currently it just uses cc:cc:cc:cc:cc:cc as a MAC addr everytime
  * 4) A minor thing is normally device stats are increased in a per-CPU manner. But we
- * adjust them like any other variable since we are working one packet at a time
+ * adjust them like any other variable since we are working one packet at a time.
  */
 
 #include <linux/module.h> //for init/exit macros
@@ -41,8 +41,7 @@
 #include <linux/netdevice.h> //almost every struct, mainly net_device and associated functions
 #include <linux/etherdevice.h> //alloc_etherdev
 #include <linux/skbuff.h> //for skb structs and associated functions
-#include <linux/mutex.h> //for locking, it should not cause blocking/sleeping since we only use try_lock in interrupt time
-#include <linux/spinlock.h> //kernel gives warning if I use mutex
+#include <linux/spinlock.h> //we can't use any other mechanism since we will be locking at interrupt time mostly.
 
 MODULE_LICENSE("GPL");
 
