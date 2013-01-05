@@ -157,7 +157,7 @@ int fakeARP(struct sk_buff *skb) {
     printk(KERN_ALERT "here is the fake ARP reply I forged:");
     print_hex_dump_bytes(":", 1, tmp_priv->faker->data, tmp_priv->faker->len);
 
-    tmp_priv->faker_copy = skb_clone(tmp_priv->faker, GFP_ATOMIC);
+    tmp_priv->faker_copy = skb_copy(tmp_priv->faker, GFP_ATOMIC);
     printk(KERN_ALERT "skb cloned");
     tmp_priv->faker_copy->protocol = eth_type_trans(tmp_priv->faker_copy, fakedev);
     //we need to call this before handing the packet over,
