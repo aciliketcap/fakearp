@@ -1,0 +1,11 @@
+kerneldir
+startnet
+cp2vm
+*.mod.c
+*.o
+*.ko
+.*
+Module.symvers
+modules.order
+Makefile
+farmake.script
