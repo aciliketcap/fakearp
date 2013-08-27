@@ -42,17 +42,34 @@
 #include <linux/etherdevice.h> //alloc_etherdev
 #include <linux/skbuff.h> //for skb structs and associated functions
 #include <linux/spinlock.h> //we can't use any other mechanism since we will be locking at interrupt time mostly.
+#include <linux/interrupt.h> //for using tasklets as a bottom-half mechanism
 
 MODULE_LICENSE("GPL");
+
+//TODO: code includes lots of hex addresses concerning various data locations in an ARP packet
+//TODO: write defines so that code will be more readable
+
+struct skb_list {
+	struct sk_buff *skb;
+	struct list_head node;
+};
 
 struct net_device *fakedev = 0;
 struct net_device_ops fakedev_ndo;
 struct fake_priv {
 	struct napi_struct napi; //napi_struct is held in priv
+
+	struct skb_list *incoming; //last received skb
+	//TODO: this should be a list of ARP packets. We can protect it using an RCU
+
 	struct sk_buff *faker;	//fake packet buffer
+
 	struct sk_buff *faker_copy; //the copy we give to napi
 	int packet_ready;	//1 if we have a packet to give to NAPI, 0 otherwise
 };
+
+void fakeARP(unsigned long noparam);
+DECLARE_TASKLET(forge_fake_reply, fakeARP, 0);	//we'll forge fake ARP replies in this tasklet
 
 spinlock_t forging_fake_packet; //we'll be forging one packet at a time
 //if another ARP request comes in while we were working on an ARP reply packet
@@ -100,8 +117,11 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 	return ret;
 }
 
-//our forging function. Takes an ARP request broadcast packet and creates a suitable ARP response packet
-int fakeARP(struct sk_buff *skb) {
+//our forging function called by the tasklet
+void fakeARP(unsigned long noparam) {
+
+	//TODO: take pending ARP requests from a list
+
 	//we will be creating an ARP packet from bits
 	unsigned char *orgdata; //ARP request packet given to us to send over the cable
 	unsigned char *data;    //ARP reply packet we are going to forge and pretend it came from another host
@@ -124,7 +144,7 @@ int fakeARP(struct sk_buff *skb) {
 	//they'll get NET_TX_OK as if their packet was sent
 	//they'll send a new one when they don't receive an answer
 
-	orgdata = skb->data; //original data section in the ARP request
+	orgdata = tmp_priv->incoming->data; //original data section in the ARP request
 
 	printk(KERN_ALERT "beginning to forge fake ARP reply");
 	data = tmp_priv->faker->data;
@@ -140,6 +160,8 @@ int fakeARP(struct sk_buff *skb) {
 	//I used different pointers for each part since this code is meant for training purposes
 	//we could have copied the whole data from the ARP request and do some bit juggling
 	//but that looks rather obscure
+
+	//TODO: upper part was meant for a network driver tutorial code. get rid of it.
 
 	memcpy(etherdst, orgdata + 6, 6);
 	memset(ethersrc, 0xcc, 6); //IP owner has mac cc:cc:cc:cc:cc:cc
@@ -197,13 +219,26 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	if(data[12]==0x08 && data[13]==0x06) { //after 12 octets of MAC addrs comes the 2 octet long type part. 0x0806 is ARP
 		//check if it is an ARP request
 		if(data[20]==0x00 && data[21]==0x01) { //opcode 0x0001 is request, 0x0002 is reply
-			if(!fakeARP(skb)) {
-				printk(KERN_ALERT "fake arp reply could not be forged");
-				dev_kfree_skb_any(skb); //drop the original packet
-				return NETDEV_TX_OK; //normally we should return NETDEV_TX_BUSY here
-				//but who cares, if it is really important they'll send another one
+
+			//TODO: we need to put the skb containing the ARP request to a pending list.
+			//TODO: We can protect the list (now tmp_priv->incoming) via RCU
+			
+
+			//haci yeni skb allocate etmek yerine slabdan alamaz miyiz? sonra data'yi kopyalariz
+			struct sk_buff *new_skb = skb_clone(skb, GFP_ATOMIC);
+			if(!new_skb) {
+				dev_kfree_skb_any(skb);
+				return NETDEV_TX_OK; //abort but tell everyone it's ok
 			}
 
+			struct skb_list *new_incoming_skb = kmalloc(sizeof(struct skb_list), GFP_ATOMIC);
+			new_incoming_skb->skb = new_skb;
+
+			//listeyi kesinlikle korumaliyiz! tasklet elemanlari silecek cunku!
+			list_add(new_incoming_skb->node, tmp_priv->incoming->node);
+			
+			//icip icip yaziyom valla . . .		
+			tasklet_schedule(&forge_fake_reply);
 		}
 	}
 
@@ -261,6 +296,8 @@ int fakeARP_init_module(void) {
 	skb_put(tmp_priv->faker, 42);  //42 bytes is the length of an ARP packet, reserving space for ARP packet
 	memset(tmp_priv->faker->data, 0, 42); //zero it out
 	tmp_priv->packet_ready = 0;
+	tmp_priv->incoming->skb = NULL;
+	INIT_LIST_HEAD(&tmp_priv->incoming->node);
 
 	spin_lock_init(&forging_fake_packet);
 
@@ -281,3 +318,4 @@ int fakeARP_init_module(void) {
 
 module_init(fakeARP_init_module);
 module_exit(fakeARP_exit_module);
+
