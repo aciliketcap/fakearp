@@ -20,20 +20,12 @@
 /*
  * This code is meant as a tutorial and does some stuff wrong, also doesn't do
  * some stuff it should be doing. I didn't introduce some features to keep it simple.
- * 1) Normally we should use rx/tx queues but right now we're using
- * only one packet as a buffer. Any other packets we receive to send are dropped.
- * 2) Our code takes a tx packet and creates an rx packet using the info inside
- * as soon as it is told to send the packet.
- * However optimally this should be done by recording the tx packet elsewhere.
- * Then telling the kernel we sent it.
- * Then using the record to forge new rx packet in a tasklet.
- * We are doing too much at interrupt time!
- * 3) It would be cooler if it used random mac addresses.
+ * 1) It would be cooler if it used random mac addresses.
  * And keep track of them, you know like a private arp table.
  * We're lying and we should be consistent.
  * Currently it just uses cc:cc:cc:cc:cc:cc as a MAC addr everytime
- * 4) A minor thing is normally device stats are increased in a per-CPU manner. But we
- * adjust them like any other variable since we are working one packet at a time.
+ * 2) A minor thing is normally device stats are increased in a per-CPU manner.
+ * 3) Add a debug mode to hide unimportant information, make it accessible as a module parameter
  */
 
 #include <linux/module.h> //for init/exit macros
@@ -46,12 +38,7 @@
 
 MODULE_LICENSE("GPL");
 
-//TODO: change all unsigned chars to __u8, ints to appropriate kernel types
-
-//TODO: code includes lots of hex addresses concerning various data locations in an ARP packet
-//TODO: write defines so that code will be more readable
-
-//ARP packet offsets
+//--- ARP packet offsets ---//
 #define etherdst  0  //destination ethernet address
 #define ethersrc  6  //source ethernet address
 #define isitARP   12 //2 bytes packet description. Should be 0x0806 if this is an ARP packet
@@ -65,27 +52,26 @@ MODULE_LICENSE("GPL");
 //we will be filling targetMAC with fake MACs and 
 //make the whole packet look like it is coming from targetMAC
 
-//incoming packet queue element
+//packet queue element (we are using kernel linked lists for packet queues)
 struct skb_list_node {
     struct sk_buff *skb;
     int processed;
     struct list_head node;
 };
 
-struct net_device *fakedev = 0;
+struct net_device *fakedev = 0;	//TODO: this should be placed into priv section as a list to allow multiple devices
 struct net_device_ops fakedev_ndo;
 struct fake_priv {
-    struct napi_struct napi; //napi_struct is held in priv
+    struct napi_struct napi; //napi_struct is held in priv section
 
     struct skb_list_node incoming_queue; //incoming skb queue 
     spinlock_t incoming_queue_protector; //incoming queue protector between rx interrupt handler and tasklet
     struct skb_list_node outgoing_queue; //outgoing skb queue
     spinlock_t outgoing_queue_protector; //outgoing queue protector between tasklet and NAPI poller
-    //TODO: don't forget to free the dynamically allocated list elements
 };
 
 void fakeARP(unsigned long noparam);
-DECLARE_TASKLET(forge_fake_reply, fakeARP, 0);  //we'll forge fake ARP replies in this tasklet
+DECLARE_TASKLET(forge_fake_reply, fakeARP, 0);  //we'll forge fake ARP replies in this tasklet ie. bottom half
 
 //int (*ndo_open)(struct net_device *dev) hook
 int fakeARP_open(struct net_device *dev) {
@@ -105,7 +91,7 @@ int fakeARP_stop(struct net_device *dev) {
     printk(KERN_ALERT "napi disabled\n");
     printk(KERN_ALERT "shutting fake arp device down\n");
 
-    //TODO: may be we should also flush the queues here?
+    //TODO: we should also flush the queues here
 
     return 0;
 }
@@ -116,22 +102,14 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 
     struct fake_priv *tmp_priv = netdev_priv(fakedev);
 
-    int ret;
+    int ret; //to test if an skb is received correctly
     int poll_ret = 0; //return 0 if all packets are transferred
 
     struct skb_list_node *outgoing_skb;
     struct skb_list_node *next_skb; //for safe list traversal
 
-    //TODO: traverse the list of outgoing nodes, giving unprocessed ones to the kernel
-    //TODO: then lock the list and delete processed nodes
-    //TODO: DON'T DELETE the skbs inside the nodes, they belong to kernel once they are processed by NAPI.
-    //TODO: not sure napi_gro_receive is the correct function here. consult kernel flow and Rami's .pdf file
-
-    //TODO: we must not exceed the budget number of packets. how can we even give more than one packet at a time?
-
     spin_lock(&tmp_priv->outgoing_queue_protector);
 
-    //TODO: we should traverse the list ourselves, so that we don't exceed the budget
     list_for_each_entry_safe(outgoing_skb, next_skb, &tmp_priv->outgoing_queue.node, node)
     {
         if(budget > 0)
@@ -164,17 +142,15 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 
     spin_unlock(&tmp_priv->outgoing_queue_protector);
 
-    napi_complete(&tmp_priv->napi); //we don't have any more packets to give you
+    napi_complete(&tmp_priv->napi); //we have given as many packets as we can
 
-    if(poll_ret) napi_schedule(&tmp_priv->napi); //we still have packets to give
+    if(poll_ret) napi_schedule(&tmp_priv->napi); //but we still have packets to give
 
     return poll_ret;
 }
 
 //our forging function called by the tasklet
 void fakeARP(unsigned long noparam) {
-
-    //TODO: take pending ARP requests from a list
 
     //we will be creating an ARP packet from bits
     __u8 *orgdata; //ARP request packet given to us to send over the cable
@@ -209,7 +185,7 @@ void fakeARP(unsigned long noparam) {
             //we'll fill data part with a valid ARP reply using the info in the ARP request
             //copy all data section first, then swap and change necessary fields
             memcpy(data, orgdata, 42);
-            //TODO: We will hold our own fake ARP table in later version
+            //TODO: We will hold our own fake ARP table in a later version
             memcpy(data, orgdata+ethersrc, 6); //copy src mac to dest mac field
             memset(data+ethersrc, 0xcc, 6); //for now all IP owners claim their mac is cc:cc:cc:cc:cc:cc
             *(data+ARPopts+7) = 0x02; //ARP replies have last octet of opts = 2
@@ -227,12 +203,11 @@ void fakeARP(unsigned long noparam) {
             outgoing_skb_node->skb = fake_skb;
             printk(KERN_ALERT "new fake skb is ready to give\n");
 
-            //TODO: eth_type_trans can be moved to NAPI poller may be, I'm not sure.
             outgoing_skb_node->skb->protocol = eth_type_trans(outgoing_skb_node->skb, fakedev);
-            __net_timestamp(outgoing_skb_node->skb); //as if we just got it fresh, without a timestamp
             //we need to call this before handing the packet over to kernel, 
             //it fixes head, data, mac etc. fields in the skb so that it seems like an ethernet packet
-            
+            __net_timestamp(outgoing_skb_node->skb); //as if we just got it fresh, without a timestamp
+
             spin_lock(&tmp_priv->outgoing_queue_protector);
             list_add(&outgoing_skb_node->node, &tmp_priv->outgoing_queue.node);
             spin_unlock(&tmp_priv->outgoing_queue_protector);
@@ -302,11 +277,12 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
         }
     }
 
-    //normally this is done in a per CPU manner
+    //TODO: normally this should be done in a per CPU manner
     dev->stats.tx_packets++;
     dev->stats.tx_bytes += skb->len;
 
     //TODO: It appears freeing skb is not our responsibility. But I'm not sure :/
+    //TODO: We should free it here if it is our responsibility though.
 
     return NETDEV_TX_OK;
 }
@@ -329,8 +305,7 @@ int fakeARP_init_module(void) {
     int ret = 0;
 
     struct fake_priv *tmp_priv; //after registering the device we'll access private section with this
-    fakedev = alloc_etherdev(sizeof(struct fake_priv));
-    //just like alloc_dev but uses ether_setup to adjust a few ethernet related fields afterwards
+    fakedev = alloc_etherdev(sizeof(struct fake_priv)); //just like alloc_dev but uses ether_setup to adjust a few ethernet related fields afterwards
     if(fakedev==NULL || fakedev == 0) {
         printk(KERN_ALERT "unable to allocate mem for fake ARP driver\n");
         return -ENOMEM;
@@ -338,21 +313,22 @@ int fakeARP_init_module(void) {
     printk(KERN_ALERT "fakeARP driver struct allocated at addr: %p\n", fakedev);
     printk(KERN_ALERT "its flags are set as %d by alloc_etherdev\n", fakedev->flags);
 
-    //let's do the necessary adjustments
+    //let's place necessary functions to the hooks
     fakedev->destructor = free_netdev; //called by unregister_device func. frees mem after unregistering
     fakedev_ndo.ndo_start_xmit = &fakeARP_tx;   //function to transmit packets to the other side of the cable
     fakedev_ndo.ndo_open = &fakeARP_open; //function used to "up" the device, ie. when user types ifconfig fkdev0 up
     fakedev_ndo.ndo_stop = &fakeARP_stop; //function used to "down" the device, ie. when user types ifconfig fkdev0 down
     fakedev->netdev_ops = &fakedev_ndo;
+
+    //adjust mac addr and device name
+    //TODO: change this code so that multiple devices are possible
     memcpy(fakedev->dev_addr, "\0AAAAAA", ETH_ALEN);
     strncpy(fakedev->name, "fkdev%d", IFNAMSIZ);
-    //fakedev->num_rx_queues = 1; //we don't need these, alloc etherdev already set it to 1 queue
-    //fakedev->num_tx_queues = 1;
 
     tmp_priv = netdev_priv(fakedev); //now that we allocated the space, we can access our private section
 
-    //init incoming packet queues and queue protectors, as many as current cpu count
-    tmp_priv->incoming_queue.skb = NULL;
+    //init incoming packet queues and queue protectors
+    tmp_priv->incoming_queue.skb = NULL; //queue head will always point to NULL
     tmp_priv->incoming_queue.processed = -1; //queue head will never be processed
     INIT_LIST_HEAD(&tmp_priv->incoming_queue.node);
 
@@ -372,7 +348,7 @@ int fakeARP_init_module(void) {
     }
 
     //add the device to NAPI system
-    netif_napi_add(fakedev, &(tmp_priv->napi), fakeARP_poll, 1024); //16 is weight used for 10M eth
+    netif_napi_add(fakedev, &(tmp_priv->napi), fakeARP_poll, 16); //16 is weight used for 10M eth
 
     return ret;
 
