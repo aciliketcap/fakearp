@@ -7,7 +7,7 @@
  * Therefore it pretends to have a connection with some other network devices
  * on the other side of its cable. (it doesn't have a cable :)
  *
- * This file is distributed under GNU GPLv3, see LICENSE file.
+ * This file is distributed under GNU GPLv2, see LICENSE file.
  * If you haven't received a file named LICENSE see <http://www.gnu.org/licences>
  *
  * Fake ARP driver is distributed WITHOUT ANY WARRANTY;
@@ -203,7 +203,6 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 				return NETDEV_TX_OK; //normally we should return NETDEV_TX_BUSY here
 				//but who cares, if it is really important they'll send another one
 			}
-
 		}
 	}
 
