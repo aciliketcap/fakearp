@@ -1,0 +1,8 @@
+farmake.script
+kerneldir
+cp2vm
+*.cmd
+*.o
+*.ko
+modules.order
+Module.symvers
