@@ -7,7 +7,7 @@
  * Therefore it pretends to have a connection with some other network devices
  * on the other side of its cable. (it doesn't have a cable :)
  *
- * This file is distributed under GNU GPLv3, see LICENSE file.
+ * This file is distributed under GNU GPLv2, see LICENSE file.
  * If you haven't received a file named LICENSE see <http://www.gnu.org/licences>
  *
  * Fake ARP driver is distributed WITHOUT ANY WARRANTY;
@@ -268,7 +268,6 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
                 //forger tasklet will take care of the rest
     	        tasklet_schedule(&forge_fake_reply);
             }
-
             else {
                 //queue is being used by the tasklet or another interrupt
                 dev->stats.tx_dropped++;
