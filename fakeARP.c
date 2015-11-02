@@ -34,6 +34,10 @@
  * Currently it just uses cc:cc:cc:cc:cc:cc as a MAC addr everytime
  * 4) A minor thing is normally device stats are increased in a per-CPU manner. But we
  * adjust them like any other variable since we are working one packet at a time.
+ *
+ * Most of these are different in the master branch. The comments and code structure is
+ * arranged to make it understandable as a tutorial. Please read master or devel branch
+ * if you want to read actual code.
  */
 
 #include <linux/module.h> //for init/exit macros
@@ -48,13 +52,13 @@ MODULE_LICENSE("GPL");
 struct net_device *fakedev = 0;
 struct net_device_ops fakedev_ndo;
 struct fake_priv {
-	struct napi_struct napi; //napi_struct is held in priv
-	struct sk_buff *faker;	//fake packet buffer
-	struct sk_buff *faker_copy; //the copy we give to napi
-	int packet_ready;	//1 if we have a packet to give to NAPI, 0 otherwise
+	struct napi_struct napi;	//napi_struct is held in priv
+	struct sk_buff *fakeskb;	//fake packet buffer
+	struct sk_buff *fakeskb_copy;	//the copy we give to napi
+	int packet_ready;		//1 if we have a packet to give to NAPI, 0 otherwise
 };
 
-spinlock_t forging_fake_packet; //we'll be forging one packet at a time
+spinlock_t forging_fake_packet; 	//we'll be forging one packet at a time
 //if another ARP request comes in while we were working on an ARP reply packet
 //it won't be processed and it will be dropped, they'll send a new one anyway
 
@@ -82,21 +86,24 @@ int fakeARP_stop(struct net_device *dev) {
 //our napi poller function, without this we can't have kernel take packets from us
 //int (*poll)(struct napi_struct *, int) hook
 int fakeARP_poll(struct napi_struct *napi, int budget) {
-	//no matter what budget is I always have just one packet :/ (since we don't utilize a tx queue)
+		//no matter what budget is I always have just one packet :/ (since we don't utilize a tx queue)
 
 	struct fake_priv *tmp_priv = netdev_priv(fakedev);
 	int ret;
 
-	if(!tmp_priv->packet_ready) return 0;
+	if(!tmp_priv->packet_ready) {
+		return 0;
+	}
 
-	ret = napi_gro_receive(&(tmp_priv->napi), tmp_priv->faker_copy);	//give the fake ARP reply to kernel
+	ret = napi_gro_receive(&(tmp_priv->napi), tmp_priv->fakeskb_copy);	//give the fake ARP reply to kernel
 	if(ret) {
 		printk(KERN_ALERT "fake arp skb fed to NAPI");
 		fakedev->stats.rx_packets++;
-		fakedev->stats.rx_bytes += tmp_priv->faker->len;
+		fakedev->stats.rx_bytes += tmp_priv->fakeskb->len;
 	}
-	napi_complete(&(tmp_priv->napi)); //we don't have any more packets to give you
-	tmp_priv->packet_ready = 0; //we gave our packet
+	napi_complete(&(tmp_priv->napi)); //we don't have any more packets to give you NAPI
+	tmp_priv->packet_ready = 0; //we gave our packet, wait for next one
+
 	return ret;
 }
 
@@ -127,7 +134,7 @@ int fakeARP(struct sk_buff *skb) {
 	orgdata = skb->data; //original data section in the ARP request
 
 	printk(KERN_ALERT "beginning to forge fake ARP reply");
-	data = tmp_priv->faker->data;
+	data = tmp_priv->fakeskb->data;
 	//we'll fill data part with a valid ARP reply using the info in the ARP request
 	etherdst = data;
 	ethersrc = data+6;
@@ -144,30 +151,34 @@ int fakeARP(struct sk_buff *skb) {
 	memcpy(etherdst, orgdata + 6, 6);
 	memset(ethersrc, 0xcc, 6); //IP owner has mac cc:cc:cc:cc:cc:cc
 	//better set this random and keep a list of it in priv section
-    memcpy(isitARP, orgdata+12, 2);
-    memcpy(ARPopts, orgdata+14, 8);
-    ARPopts[7] = 0x02; //arp reply has last bit of opts 2 instead of 1
-    memset(senderMAC, 0xcc, 6); //again fake IP owner mac
-    //again we should make this random
-    memcpy(senderIP, orgdata+38, 4); //copy the asked address to sender field
-    memcpy(targetMAC, orgdata+22, 6); //copy sender MAC to target MAC
-    memcpy(targetIP, orgdata+28, 4); //copy sender IP to target IP
+	memcpy(isitARP, orgdata+12, 2);
+	memcpy(ARPopts, orgdata+14, 8);
+	ARPopts[7] = 0x02; //arp reply has last bit of opts 2 instead of 1
+	memset(senderMAC, 0xcc, 6); //again fake IP owner mac
+	//again we should make this random
+	memcpy(senderIP, orgdata+38, 4); //copy the asked address to sender field
+	memcpy(targetMAC, orgdata+22, 6); //copy sender MAC to target MAC
+	memcpy(targetIP, orgdata+28, 4); //copy sender IP to target IP
 
-    //that's it, let's see our forged packet
-    printk(KERN_ALERT "here is the fake ARP reply I forged:");
-    print_hex_dump_bytes(":", 1, tmp_priv->faker->data, tmp_priv->faker->len);
+	//that's it, let's see our forged packet
+	printk(KERN_ALERT "here is the fake ARP reply I forged:");
+	print_hex_dump_bytes(":", 1, tmp_priv->fakeskb->data, tmp_priv->fakeskb->len);
 
-    tmp_priv->faker_copy = skb_copy(tmp_priv->faker, GFP_ATOMIC);
-    printk(KERN_ALERT "skb cloned");
-    tmp_priv->faker_copy->protocol = eth_type_trans(tmp_priv->faker_copy, fakedev);
-    //we need to call this before handing the packet over,
-    //it fixes head, data, mac etc. fields in the skb so that it seems like an ethernet packet
-    //we do it on the copy, if we adjust it on the original, we have to set everything back everytime this function runs.
-    if(tmp_priv->faker_copy) tmp_priv->packet_ready = 1;
-    spin_unlock(&forging_fake_packet);
+	tmp_priv->fakeskb_copy = skb_copy(tmp_priv->fakeskb, GFP_ATOMIC);
+	printk(KERN_ALERT "skb cloned");
+	tmp_priv->fakeskb_copy->protocol = eth_type_trans(tmp_priv->fakeskb_copy, fakedev);
+	//we need to call eth_type_trans before handing the packet over,
+	//it sets ethernet header ptr, decides packet type (which is what to do with the packet actually)
+	//and returns ethernet protocol (I was surprised to learn there are more than one, too)
 
-    napi_schedule(&(tmp_priv->napi)); //tell napi system we may have received packets and it should poll our device some time.
-    printk(KERN_ALERT "napi scheduled, waiting for poller to take the fake ARP reply");
+	//we use fakeskb to set fields on it and take a copy, then use eth_type_trans on the copy
+	//if we adjust fakeskb directly, we may have to set some fields back next time
+
+	if(tmp_priv->fakeskb_copy) tmp_priv->packet_ready = 1;
+	spin_unlock(&forging_fake_packet);
+
+	napi_schedule(&(tmp_priv->napi)); //tell napi system we have received packets and it should poll our device some time.
+	printk(KERN_ALERT "napi scheduled, waiting for poller to take the fake ARP reply");
 
 	return 1; 	//success
 }
@@ -193,9 +204,8 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 		return NETDEV_TX_BUSY; //tell the kernel we dropped the packet and it should resend it sometime later.
 	}
 
-	//check if the packet is an ARP packet
+	//check if the packet is an ARP request packet
 	if(data[12]==0x08 && data[13]==0x06) { //after 12 octets of MAC addrs comes the 2 octet long type part. 0x0806 is ARP
-		//check if it is an ARP request
 		if(data[20]==0x00 && data[21]==0x01) { //opcode 0x0001 is request, 0x0002 is reply
 			if(!fakeARP(skb)) {
 				printk(KERN_ALERT "fake arp reply could not be forged");
@@ -213,7 +223,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	//the packet is not an ARP request therefore we are not interested in it
 	dev_kfree_skb_any(skb); //oops, we dropped it :D
 	//we'll still tell them we sent it over the cable though
-	//we used dev_kfree_skb_any because the function may run on int time or syscall time
+	//we used dev_kfree_skb_any because this function may run on int time or syscall time
 
 	return NETDEV_TX_OK;
 }
@@ -221,17 +231,19 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 void fakeARP_exit_module(void) {
 	if(fakedev) {
 		spin_lock(&forging_fake_packet); //we are shutting down take back the lock if someone else is using and don't give back
-		unregister_netdev(fakedev); //also free's device and priv parts since we set fakedev->destructor to free_dev
+		unregister_netdev(fakedev); //also free's device and priv parts since we set fakedev->destructor to free_netdev
 		spin_unlock(&forging_fake_packet);
 	}
 	return;
 }
 
 int fakeARP_init_module(void) {
+
 	int ret;
 	struct fake_priv *tmp_priv; //after registering the device we'll access private section with this
+
 	fakedev = alloc_etherdev(sizeof(struct fake_priv));
-	//just like alloc_dev but uses ether_setup to adjust a few ethernet related fields afterwards
+	//just like alloc_dev but uses ether_setup to adjust various ethernet related fields afterwards
 	if(fakedev==NULL || fakedev == 0) {
 		printk(KERN_ALERT "unable to allocate mem for fake ARP driver");
 		return -ENOMEM;
@@ -245,20 +257,20 @@ int fakeARP_init_module(void) {
 	fakedev_ndo.ndo_open = &fakeARP_open; //function used to "up" the device, ie. when user types ifconfig fkdev0 up
 	fakedev_ndo.ndo_stop = &fakeARP_stop; //function used to "down" the device, ie. when user types ifconfig fkdev0 down
 	fakedev->netdev_ops = &fakedev_ndo;
-	memcpy(fakedev->dev_addr, "\0AAAAAA", ETH_ALEN);
-	strncpy(fakedev->name, "fkdev%d", IFNAMSIZ);
+	memcpy(fakedev->dev_addr, "\0AAAAAA", ETH_ALEN); //set device MAC to AA:AA:AA:00:00:00
+	strncpy(fakedev->name, "fkdev%d", IFNAMSIZ); //set device name fkdev0
 	fakedev->num_rx_queues = 1; //we don't need these, alloc etherdev already set it to 1 queue
 	fakedev->num_tx_queues = 1;
 
 	tmp_priv = netdev_priv(fakedev); //now that we allocated the space, we can access our private section
 
-	tmp_priv->faker = alloc_skb(42, GFP_KERNEL); //create the empty skb we'll put our fake reply inside
-	if(tmp_priv->faker==NULL) {
+	tmp_priv->fakeskb = alloc_skb(42, GFP_KERNEL); //create the empty skb we'll arrange as our fake reply
+	if(tmp_priv->fakeskb==NULL) {
 		printk(KERN_ALERT "unable to allocate new skb for fake ARP packet");
 		return -ENOMEM; //if allocation is not successful return
 	}
-	skb_put(tmp_priv->faker, 42);  //42 bytes is the length of an ARP packet, reserving space for ARP packet
-	memset(tmp_priv->faker->data, 0, 42); //zero it out
+	skb_put(tmp_priv->fakeskb, 42);  //42 bytes is the length of an ARP packet, reserving space for ARP packet
+	memset(tmp_priv->fakeskb->data, 0, 42); //zero it out
 	tmp_priv->packet_ready = 0;
 
 	spin_lock_init(&forging_fake_packet);
