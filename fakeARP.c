@@ -276,7 +276,7 @@ int fakeARP_init_module(void) {
 	spin_lock_init(&forging_fake_packet);
 
 	//everything is set, register the device
-	ret = register_netdevice(fakedev);
+	ret = register_netdev(fakedev);
 
 	if(ret) {
 		printk(KERN_ALERT "unable to register device. error code: %d", ret);
