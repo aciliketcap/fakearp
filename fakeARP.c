@@ -263,9 +263,7 @@ int fakeARP_init_module(void) {
 	fakedev_ndo.ndo_stop = &fakeARP_stop; //function used to "down" the device, ie. when user types ifconfig fkdev0 down
 	fakedev->netdev_ops = &fakedev_ndo;
 	memcpy(fakedev->dev_addr, "\0AAAAAA", ETH_ALEN); //set device MAC to AA:AA:AA:00:00:00
-	strncpy(fakedev->name, "fkdev%d", IFNAMSIZ); //set device name fkdev0
-	fakedev->num_rx_queues = 1; //we don't need these, alloc etherdev already set it to 1 queue
-	fakedev->num_tx_queues = 1;
+	strncpy(fakedev->name, "fkdev%d", IFNAMSIZ); //change device name fkdev0
 
 	tmp_priv = netdev_priv(fakedev); //now that we allocated the space, we can access our private section
 
