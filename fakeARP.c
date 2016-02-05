@@ -68,7 +68,10 @@ int fakeARP_open(struct net_device *dev) {
 	printk(KERN_ALERT "setting fake arp device up!\n");
 
 	napi_enable(&(tmp_priv->napi));
-	printk(KERN_ALERT "napi enabled\n");
+	printk(KERN_ALERT "napi enabled for rx\n");
+
+        netif_start_queue(dev);
+	printk(KERN_ALERT "tx enabled\n");
 
 	return 0;
 }
@@ -78,6 +81,8 @@ int fakeARP_stop(struct net_device *dev) {
 	struct fake_priv *tmp_priv = netdev_priv(dev);
 	napi_disable(&(tmp_priv->napi));
 	printk(KERN_ALERT "napi disabled\n");
+        netif_start_queue(dev);
+	printk(KERN_ALERT "tx disabled\n");
 	printk(KERN_ALERT "shutting fake arp device down\n");
 
 	return 0;
@@ -194,7 +199,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 		dev_kfree_skb_any(skb);
 		printk(KERN_ALERT "we are waiting for kernel to take our previous ARP reply right now, give the packet back\n");
 		netif_stop_queue(dev);
-		return NETDEV_TX_BUSY; //tell the kernel ww could not process the packet and it should resend it sometime later.
+		return NETDEV_TX_BUSY; //tell the kernel we could not process the packet and it should resend it sometime later.
 	}
 
 	//check if the packet is an ARP request packet
@@ -205,9 +210,6 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 				printk(KERN_ALERT "some other CPU is already preparing a packet, I am returning\n");
 				return NETDEV_TX_BUSY;
 			}
-			//if anyone else tries to give us packets while we are forging
-			//they'll get NET_TX_OK as if their packet was sent
-			//they'll send a new one when they don't receive an answer
 
 			if(!fakeARP(skb)) {
 				printk(KERN_ALERT "fake arp reply could not be forged because of some error\n"); //no error case in tutorial
@@ -221,11 +223,11 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 		}
 	}
 
-	//normally this is done in a per CPU manner
+	//normally stats are gathered in a per CPU manner, but we can already use at most one CPU
 	dev->stats.tx_packets++;
 	dev->stats.tx_bytes += skb->len;
 
-	//the packet is not an ARP request therefore we are not interested in it
+	//if the packet is not an ARP request are not interested in it
 	dev_kfree_skb_any(skb); //oops, we dropped it :D
 	//we'll still tell them we sent it over the cable though
 	//we used dev_kfree_skb_any because this function may run on int time or syscall time
@@ -286,7 +288,7 @@ int fakeARP_init_module(void) {
 		return ret;
 	}
 
-	//register the device to NAPI system
+	//register the device to NAPI system for receive
 	netif_napi_add(fakedev, &(tmp_priv->napi), &fakeARP_poll, 16); //16 is weight used for 10M eth
 
 	return ret;
