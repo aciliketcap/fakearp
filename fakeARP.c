@@ -75,20 +75,28 @@ DECLARE_TASKLET(forge_fake_reply, fakeARP, 0);  //we'll forge fake ARP replies i
 
 //int (*ndo_open)(struct net_device *dev) hook
 int fakeARP_open(struct net_device *dev) {
-    struct fake_priv *tmp_priv = netdev_priv(dev);
-    printk(KERN_ALERT "setting fake arp device up!\n");
+        struct fake_priv *tmp_priv = netdev_priv(dev);
+        printk(KERN_ALERT "setting fake arp device up!\n");
 
-    napi_enable(&(tmp_priv->napi));
-    printk(KERN_ALERT "napi enabled\n");
+        napi_enable(&(tmp_priv->napi));
+        printk(KERN_ALERT "napi enabled for rx\n");
 
-    return 0;
+        netif_start_queue(dev);
+        printk(KERN_ALERT "tx queue enabled\n");
+
+        return 0;
 }
 
 //int (*ndo_stop)(struct net_device *dev) hook
 int fakeARP_stop(struct net_device *dev) {
     struct fake_priv *tmp_priv = netdev_priv(dev);
+
     napi_disable(&(tmp_priv->napi));
     printk(KERN_ALERT "napi disabled\n");
+
+    netif_stop_queue(dev);
+    printk(KERN_ALERT "tx queue disabled\n");
+
     printk(KERN_ALERT "shutting fake arp device down\n");
 
     //TODO: we should also flush the queues here
@@ -255,7 +263,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
     	    	printk(KERN_ALERT "failed to clone skb for forging\n");
                     spin_unlock(&tmp_priv->incoming_queue_protector);
                     dev->stats.tx_dropped++;
-                    return NETDEV_TX_LOCKED; //if cloning fails drop the packet
+                    return NETDEV_TX_BUSY; //if cloning fails give the packet back
                 }
 
                 incoming_skb_node = kmalloc(sizeof(struct skb_list_node), GFP_ATOMIC);
@@ -272,7 +280,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
             else {
                 //queue is being used by the tasklet or another interrupt
                 dev->stats.tx_dropped++;
-                return NETDEV_TX_LOCKED;
+                return NETDEV_TX_BUSY;
             }
         }
     }
@@ -339,6 +347,9 @@ int fakeARP_init_module(void) {
     spin_lock_init(&tmp_priv->incoming_queue_protector);
     spin_lock_init(&tmp_priv->outgoing_queue_protector);
 
+    //add the device to NAPI system
+    netif_napi_add(fakedev, &(tmp_priv->napi), fakeARP_poll, 16); //16 is weight used for 10M eth
+
     //everything is set, register the device
     ret = register_netdev(fakedev);
 
@@ -346,9 +357,6 @@ int fakeARP_init_module(void) {
         printk(KERN_ALERT "unable to register device. error code: %d\n", ret);
         return ret;
     }
-
-    //add the device to NAPI system
-    netif_napi_add(fakedev, &(tmp_priv->napi), fakeARP_poll, 16); //16 is weight used for 10M eth
 
     return ret;
 

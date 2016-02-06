@@ -1,1 +1,1 @@
-make -C kerneldir/ M="path to the code directory" modules
+make -C kerneldir/ M=$(pwd) modules
