@@ -25,7 +25,6 @@
  * We're lying and we should be consistent.
  * Currently it just uses cc:cc:cc:cc:cc:cc as a MAC addr everytime
  * 2) A minor thing is normally device stats are increased in a per-CPU manner.
- * 3) Add a debug mode to hide unimportant information, make it accessible as a module parameter
  */
 
 #include <linux/module.h> //for init/exit macros
@@ -50,7 +49,7 @@ MODULE_LICENSE("GPL");
 //ARP requests give targetIP and ask targetMAC
 //ARP replies fill the MAC address and sends the same packet back
 //we will be filling targetMAC with fake MACs and 
-//make the whole packet look like it is coming from targetMAC
+//make the whole packet look like it is coming from target MAC
 
 //packet queue element (we are using kernel linked lists for packet queues)
 struct skb_list_node {
@@ -76,13 +75,13 @@ DECLARE_TASKLET(forge_fake_reply, fakeARP, 0);  //we'll forge fake ARP replies i
 //int (*ndo_open)(struct net_device *dev) hook
 int fakeARP_open(struct net_device *dev) {
 	struct fake_priv *tmp_priv = netdev_priv(dev);
-	printk(KERN_ALERT "setting fake arp device up!\n");
+	printk(KERN_NOTICE "setting fake arp device up!\n");
 
 	napi_enable(&(tmp_priv->napi));
-	printk(KERN_ALERT "napi enabled for rx\n");
+	printk(KERN_INFO "napi enabled for rx\n");
 
 	netif_start_queue(dev);
-	printk(KERN_ALERT "tx queue enabled\n");
+	printk(KERN_INFO "tx queue enabled\n");
 
 	return 0;
 }
@@ -92,12 +91,12 @@ int fakeARP_stop(struct net_device *dev) {
 	struct fake_priv *tmp_priv = netdev_priv(dev);
 
 	napi_disable(&(tmp_priv->napi));
-	printk(KERN_ALERT "napi disabled\n");
+	printk(KERN_INFO"napi disabled\n");
 
 	netif_stop_queue(dev);
-	printk(KERN_ALERT "tx queue disabled\n");
+	printk(KERN_INFO "tx queue disabled\n");
 
-	printk(KERN_ALERT "shutting fake arp device down\n");
+	printk(KERN_NOTICE "shutting fake arp device down\n");
 
 	//TODO: we should also flush the queues here
 
@@ -121,13 +120,13 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 	list_for_each_entry_safe(outgoing_skb, next_skb, &tmp_priv->outgoing_queue.node, node) 	{
 		if(budget > 0) {
 			if(outgoing_skb->skb != NULL) { //don't delete the starting node, we use it to access the queue!
-				printk(KERN_ALERT "here is the fake ARP reply I'll feed to NAPI :\n");
-				print_hex_dump_bytes(":", 1, outgoing_skb->skb->data, outgoing_skb->skb->len);
+				printk(KERN_DEBUG "here is the fake ARP reply I'll feed to NAPI :\n");
+				print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, outgoing_skb->skb->data, outgoing_skb->skb->len, true); //print_hex_dump_bytes modified
 
 				ret = netif_receive_skb(outgoing_skb->skb);	//give the fake ARP reply to kernel
 
 				if(ret==NET_RX_SUCCESS) {
-					printk(KERN_ALERT "fake arp reply skb fed to NAPI\n");
+					printk(KERN_INFO "fake arp reply skb fed to NAPI\n");
 
 					fakedev->stats.rx_packets++;
 					fakedev->stats.rx_bytes += outgoing_skb->skb->len;
@@ -172,15 +171,15 @@ void fakeARP(unsigned long noparam) {
 		if(incoming_skb_node->skb != NULL) {
 			struct sk_buff *fake_skb = alloc_skb(42, GFP_KERNEL); //allocate a new skb for fake ARP response
 			if(fake_skb==NULL) {
-				printk(KERN_ALERT "unable to allocate new skb for the fake ARP packet\n");
-			break;
+				printk(KERN_CRIT "unable to allocate new skb for the fake ARP packet\n");
+				break;
 			}
 			skb_put(fake_skb, 42); //create enough data section for fake ARP packet
 			memset(fake_skb, 0, 42); //zero it out
 
 			orgdata = incoming_skb_node->skb->data; //original data section in the ARP request
 
-			printk(KERN_ALERT "beginning to forge fake ARP reply\n");
+			printk(KERN_DEBUG "beginning to forge fake ARP reply\n");
 			data = fake_skb->data;
 
 			//we'll fill data part with a valid ARP reply using the info in the ARP request
@@ -196,13 +195,14 @@ void fakeARP(unsigned long noparam) {
 			memcpy(data+targetIP, orgdata+senderIP, 4); //copy sender IP to target IP
 
 			//that's it, let's see our forged packet
-			printk(KERN_ALERT "here is the fake ARP reply I forged:\n");
-			print_hex_dump_bytes(":", 1, fake_skb->data, fake_skb->len);
+			printk(KERN_DEBUG "here is the fake ARP reply I forged:\n");
+			print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, fake_skb->data, fake_skb->len, true); //print_hex_dump_bytes modified
+
 
 			//add fake_skb to outgoing queue
 			outgoing_skb_node = (struct skb_list_node*) kmalloc(sizeof(struct skb_list_node), GFP_KERNEL); //TODO: what if allocation fails here?
 			outgoing_skb_node->skb = fake_skb;
-			printk(KERN_ALERT "new fake skb is ready to give\n");
+			printk(KERN_DEBUG "new fake skb is ready to give\n");
 
 			outgoing_skb_node->skb->protocol = eth_type_trans(outgoing_skb_node->skb, fakedev);
 			//we need to call this before handing the packet over to kernel,
@@ -223,7 +223,7 @@ void fakeARP(unsigned long noparam) {
 
 	napi_schedule(&tmp_priv->napi); //tell napi system we may have received packets and it should poll our device some time.
 
-	printk(KERN_ALERT "napi scheduled, waiting for poller to take the fake ARP reply\n");
+	printk(KERN_DEBUG "napi scheduled, waiting for poller to take the fake ARP reply\n");
 
 	return;   //success
 }
@@ -240,8 +240,8 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	data = skb->data;
 
 	//let's see what they want us to send (for debug)
-	printk(KERN_ALERT "I have received a packet:\n");
-	print_hex_dump_bytes(":", 1, skb->data, skb->len);
+	printk(KERN_DEBUG "I have received a packet:\n");
+        print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, skb->data, skb->len, true); //print_hex_dump_bytes modified
 
 	//check if the packet is an ARP packet
 	if(data[isitARP]==0x08 && data[isitARP+1]==0x06) { //2 octet long ethernet packet type part. 0x0806 is ARP
@@ -253,7 +253,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 
 				struct sk_buff *incoming_skb = skb_clone(skb, GFP_ATOMIC);
 				if(!incoming_skb) {
-				printk(KERN_ALERT "failed to clone skb for forging\n");
+					printk(KERN_CRIT "failed to clone skb for forging\n");
 					spin_unlock(&tmp_priv->incoming_queue_protector);
 					dev->stats.tx_dropped++;
 					return NETDEV_TX_BUSY; //if cloning fails give the packet back
@@ -305,11 +305,11 @@ int fakeARP_init_module(void) {
 
 	fakedev = alloc_etherdev(sizeof(struct fake_priv)); //just like alloc_dev but uses ether_setup to adjust a few ethernet related fields afterwards
 	if(fakedev==NULL || fakedev == 0) {
-		printk(KERN_ALERT "unable to allocate mem for fake ARP driver\n");
+		printk(KERN_CRIT "unable to allocate mem for fake ARP driver\n");
 		return -ENOMEM;
 	}
-	printk(KERN_ALERT "fakeARP driver struct allocated at addr: %p\n", fakedev);
-	printk(KERN_ALERT "its flags are set as %d by alloc_etherdev\n", fakedev->flags);
+	printk(KERN_DEBUG "fakeARP driver struct allocated at addr: %p\n", fakedev);
+	printk(KERN_DEBUG "its flags are set as %d by alloc_etherdev\n", fakedev->flags);
 
 	//let's place necessary functions to the hooks
 	fakedev->destructor = free_netdev; //called by unregister_device func. frees mem after unregistering
@@ -344,7 +344,7 @@ int fakeARP_init_module(void) {
 	ret = register_netdev(fakedev);
 
 	if(ret) {
-		printk(KERN_ALERT "unable to register device. error code: %d\n", ret);
+		printk(KERN_CRIT "unable to register device. error code: %d\n", ret);
 		return ret;
 	}
 
