@@ -173,10 +173,7 @@ int fakeARP(struct sk_buff *skb) {
 	//it sets ethernet header ptr, decides packet type (which is what to do with the packet actually)
 	//and returns the ethernet protocol (I was surprised to learn there are more than one, too)
 
-	//we use fakeskb to set fields on it and take a copy, then use eth_type_trans on the copy
-	//if we adjust fakeskb directly, we may have to set some fields back next time
-
-	if(tmp_priv->fakeskb_copy) tmp_priv->packet_ready = 1;
+	tmp_priv->packet_ready = 1;
 
 	napi_schedule(&(tmp_priv->napi)); //tell napi system we have received packets and it should poll our device some time.
 	printk(KERN_ALERT "napi scheduled, waiting for poller to take the fake ARP reply\n");
