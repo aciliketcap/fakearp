@@ -209,7 +209,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	if(data[12]==0x08 && data[13]==0x06) { //after 12 octets of MAC addrs comes the 2 octet long type part. 0x0806 is ARP
 		if(data[20]==0x00 && data[21]==0x01) { //opcode 0x0001 is request, 0x0002 is reply
 
-			netif_stop_queue(dev); //we won't be able to take new packets, we can forge only one at a time
+			netif_stop_queue(dev); //tell kernel we won't be able to take new packets, we can forge only one at a time
 
 			if(!fakeARP(skb)) {
 				printk(KERN_ALERT "fake arp reply could not be forged because of some error\n"); //no error case in tutorial
