@@ -10,13 +10,13 @@ My development environment consists of seperate test kernel which runs on a VM. 
 
 If you want to compile for the running kernel just type 'make'. 
 
-I am developing the driver using 3.12.x kernel series.
+I am developing the driver using 3.14.x kernel series.
 
 Under any circumstances this code should not be run on a production system. I am a newbie at developing kernel code and this is the very first network driver code I have ever written. 
 
 Please send me any bugs you encounter.
 
-Finally this distribution of code is licensed under GNU General Public License version 3. Fake ARP driver is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details. You should have received a copy of it in a file named LICENSE, if not see (http://www.gnu.org/licenses/).
+Finally this distribution of code is licensed under GNU General Public License version 2. Fake ARP driver is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details. You should have received a copy of it in a file named LICENSE, if not see (http://www.gnu.org/licenses/).
 
 Hope it helps anyone trying to learn about Linux network drivers,
 Sinan
