@@ -69,7 +69,7 @@ int fakeARP_open(struct net_device *dev) {
 	napi_enable(&(tmp_priv->napi));
 	printk(KERN_ALERT "napi enabled for rx\n");
 
-        netif_start_queue(dev);
+	netif_start_queue(dev);
 	printk(KERN_ALERT "tx enabled\n");
 
 	return 0;
@@ -82,7 +82,7 @@ int fakeARP_stop(struct net_device *dev) {
 	napi_disable(&(tmp_priv->napi));
 	printk(KERN_ALERT "napi disabled\n");
 
-        netif_start_queue(dev);
+	netif_start_queue(dev);
 	printk(KERN_ALERT "tx disabled\n");
 
 	printk(KERN_ALERT "shutting fake arp device down\n");
@@ -122,7 +122,7 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 int fakeARP(struct sk_buff *skb) {
 	//we will be creating an ARP packet from bits
 	unsigned char *orgdata; //ARP request packet given to us to send over the cable
-	unsigned char *data;    //ARP reply packet we are going to forge and pretend it came from another host
+	unsigned char *data;	 //ARP reply packet we are going to forge and pretend it came from another host
 	unsigned char *ethersrc; //src in ethernet header
 	unsigned char *etherdst; //dst in ethernet header
 	unsigned char *isitARP; //ARP protocol identifier
@@ -268,7 +268,7 @@ int fakeARP_init_module(void) {
 		return -ENOMEM; //if allocation is not successful return
 	}
 
-	skb_put(tmp_priv->fakeskb, 42);  //42 bytes is the length of an ARP packet, reserving space for ARP packet
+	skb_put(tmp_priv->fakeskb, 42); //42 bytes is the length of an ARP packet, reserving space for ARP packet
 	memset(tmp_priv->fakeskb->data, 0, 42); //zero it out
 	tmp_priv->packet_ready = 0;
 
