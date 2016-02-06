@@ -199,7 +199,6 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	print_hex_dump(KERN_ALERT, ":", 1, 16, 1, skb->data, skb->len, true); //print_hex_dump_bytes modified
 
 	if(tmp_priv->packet_ready) {
-		dev_kfree_skb_any(skb);
 		printk(KERN_ALERT "we are waiting for kernel to take our previous ARP reply right now, give the packet back\n");
 		netif_stop_queue(dev);
 		return NETDEV_TX_BUSY; //tell the kernel we could not process the packet and it should resend it sometime later.
