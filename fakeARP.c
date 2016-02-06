@@ -276,6 +276,9 @@ int fakeARP_init_module(void) {
 	memset(tmp_priv->fakeskb->data, 0, 42); //zero it out
 	tmp_priv->packet_ready = 0;
 
+	//register the device to NAPI system for receive polling
+	netif_napi_add(fakedev, &(tmp_priv->napi), &fakeARP_poll, 16); //16 is weight used for 10M eth
+
 	//everything is set, register the device
 	ret = register_netdev(fakedev);
 
@@ -283,9 +286,6 @@ int fakeARP_init_module(void) {
 		printk(KERN_ALERT "unable to register device. error code: %d\n", ret);
 		return ret;
 	}
-
-	//register the device to NAPI system for receive polling
-	netif_napi_add(fakedev, &(tmp_priv->napi), &fakeARP_poll, 16); //16 is weight used for 10M eth
 
 	return ret;
 }
