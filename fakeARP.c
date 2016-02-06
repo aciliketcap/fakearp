@@ -82,7 +82,7 @@ int fakeARP_stop(struct net_device *dev) {
 	napi_disable(&(tmp_priv->napi));
 	printk(KERN_ALERT "napi disabled\n");
 
-	netif_start_queue(dev);
+	netif_stop_queue(dev);
 	printk(KERN_ALERT "tx disabled\n");
 
 	printk(KERN_ALERT "shutting fake arp device down\n");
