@@ -34,6 +34,8 @@
 #include <linux/skbuff.h> //for skb structs and associated functions
 #include <linux/spinlock.h> //we can't use any other mechanism since we will be locking at interrupt time mostly.
 #include <linux/interrupt.h> //for using tasklets as a bottom-half mechanism
+#include <linux/percpu.h> //per-cpu variables for holding stats
+#include <linux/u64_stats_sync.h> //to sync 64bit per-cpu variables on 32bit archs
 
 MODULE_LICENSE("GPL");
 
@@ -58,6 +60,18 @@ struct skb_list_node {
 	struct list_head node;
 };
 
+//this just prevents cache invalidation on all cpus when one cpu updates stats
+//no performce gain since we are already locking for input / output lists
+//I wanted to try out per-cpu variables
+struct pcpu_lstats {
+	u64 rx_packets;
+	u64 tx_packets;
+	u64 rx_bytes;
+	u64 tx_bytes;
+	u64 tx_dropped;
+	struct u64_stats_sync syncp;
+};
+
 struct net_device *fakedev = 0;	//TODO: this should be placed into priv section as a list to allow multiple devices
 struct net_device_ops fakedev_ndo;
 struct fake_priv {
@@ -71,6 +85,59 @@ struct fake_priv {
 
 void fakeARP(unsigned long noparam);
 DECLARE_TASKLET(forge_fake_reply, fakeARP, 0);  //we'll forge fake ARP replies in this tasklet ie. bottom half
+
+//struct rtnl_link_stats64* (*ndo_get_stats64) hook
+struct rtnl_link_stats64 *fakeARP_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *total_stats)
+{
+	u64 total_rx_packets = 0;
+	u64 total_tx_packets = 0;
+	u64 total_rx_bytes = 0;
+	u64 total_tx_bytes = 0;
+	u64 total_tx_dropped = 0;
+	int i;
+
+	for_each_possible_cpu(i) {
+		const struct pcpu_lstats *tc_stats; //this cpu's stats
+		u64 tc_rx_packets, tc_tx_packets, tc_rx_bytes, tc_tx_bytes, tc_tx_dropped; //this cpu's packet and byte counts
+		unsigned int start; //for sync
+
+		tc_stats = per_cpu_ptr(dev->lstats, i);
+		do {
+			start = u64_stats_fetch_begin_bh(&tc_stats->syncp);
+			tc_rx_packets = tc_stats->rx_packets;
+			tc_tx_packets = tc_stats->tx_packets;
+			tc_rx_bytes = tc_stats->rx_bytes;
+			tc_tx_bytes = tc_stats->tx_bytes;
+			tc_tx_dropped = tc_stats->tx_dropped;
+		} while (u64_stats_fetch_retry_bh(&tc_stats->syncp, start));
+
+		printk(KERN_DEBUG "rx packets for cpu %d: %llu\n", i, tc_rx_packets);
+		printk(KERN_DEBUG "tx packets for cpu %d: %llu\n", i, tc_tx_packets);
+		printk(KERN_DEBUG "rx bytes for cpu %d: %llu\n", i, tc_rx_bytes);
+		printk(KERN_DEBUG "tx bytes for cpu %d: %llu\n", i, tc_tx_bytes);
+		printk(KERN_DEBUG "tx drops for cpu %d: %llu\n", i, tc_tx_dropped);
+
+		total_rx_packets += tc_rx_packets;
+		total_tx_packets += tc_tx_packets;
+		total_rx_bytes   += tc_rx_bytes;
+		total_tx_bytes   += tc_tx_bytes;
+		total_tx_dropped += tc_tx_dropped;
+	}
+
+	printk(KERN_DEBUG "rx packets total: %llu\n", total_rx_packets);
+	printk(KERN_DEBUG "tx packets total: %llu\n", total_tx_packets);
+	printk(KERN_DEBUG "rx bytes total: %llu\n", total_rx_bytes);
+	printk(KERN_DEBUG "tx bytes total: %llu\n", total_tx_bytes);
+	printk(KERN_DEBUG "tx drops total: %llu\n", total_tx_dropped);
+
+	total_stats->rx_packets = total_rx_packets;
+	total_stats->tx_packets = total_tx_packets;
+	total_stats->rx_bytes   = total_rx_bytes;
+	total_stats->tx_bytes   = total_tx_bytes;
+	total_stats->tx_dropped = total_tx_dropped;
+
+	return total_stats;
+}
 
 //int (*ndo_open)(struct net_device *dev) hook
 int fakeARP_open(struct net_device *dev) {
@@ -108,12 +175,16 @@ int fakeARP_stop(struct net_device *dev) {
 int fakeARP_poll(struct napi_struct *napi, int budget) {
 
 	struct fake_priv *tmp_priv = netdev_priv(fakedev);
+	struct pcpu_lstats *tc_stats; //this cpu's stats
 
 	int ret; //to test if an skb is received correctly
 	int poll_ret = 0; //return 0 if all packets are transferred
 
 	struct skb_list_node *outgoing_skb;
 	struct skb_list_node *next_skb; //for safe list traversal
+
+	//please don't preempt me while I use a pointer specific to this cpu
+	tc_stats = get_cpu_ptr(fakedev->lstats);
 
 	spin_lock(&tmp_priv->outgoing_queue_protector);
 
@@ -128,8 +199,11 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 				if(ret==NET_RX_SUCCESS) {
 					printk(KERN_INFO "fake arp reply skb fed to NAPI\n");
 
-					fakedev->stats.rx_packets++;
-					fakedev->stats.rx_bytes += outgoing_skb->skb->len;
+					//just for 64bit per cpu variables if we are on 32 bit arch
+					u64_stats_update_begin(&tc_stats->syncp);
+					tc_stats->rx_bytes += outgoing_skb->skb->len;
+					tc_stats->rx_packets++;
+					u64_stats_update_end(&tc_stats->syncp);
 
 					budget--;
 
@@ -143,6 +217,8 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 	}
 
 	spin_unlock(&tmp_priv->outgoing_queue_protector);
+
+	put_cpu_ptr(fakedev->lstats);
 
 	napi_complete(&tmp_priv->napi); //we have given as many packets as we can
 
@@ -234,7 +310,11 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	__u8 *data;
 	int len;
 	struct skb_list_node *incoming_skb_node;
+	struct pcpu_lstats *tc_stats; //this cpu's stats
 	struct fake_priv *tmp_priv = netdev_priv(fakedev);
+
+	//please don't preempt me while I use a pointer specific to this cpu
+	tc_stats = get_cpu_ptr(fakedev->lstats);
 
 	len = skb->len;
 	data = skb->data;
@@ -255,7 +335,6 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 				if(!incoming_skb) {
 					printk(KERN_CRIT "failed to clone skb for forging\n");
 					spin_unlock(&tmp_priv->incoming_queue_protector);
-					dev->stats.tx_dropped++;
 					return NETDEV_TX_BUSY; //if cloning fails give the packet back
 				}
 
@@ -270,15 +349,18 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 				tasklet_schedule(&forge_fake_reply);
 			} else {
 				//queue is being used by the tasklet or another interrupt
-				dev->stats.tx_dropped++;
 				return NETDEV_TX_BUSY;
 			}
 		}
 	}
 
-	//TODO: normally this should be done in a per CPU manner
-	dev->stats.tx_packets++;
-	dev->stats.tx_bytes += skb->len;
+	//just for 64bit per cpu variables if we are on 32 bit arch
+	u64_stats_update_begin(&tc_stats->syncp);
+	tc_stats->tx_bytes += len;
+	tc_stats->tx_packets++;
+	u64_stats_update_end(&tc_stats->syncp);
+
+	put_cpu_ptr(fakedev->lstats);
 
 	//even if the packet is not an ARP packet we'll tell we sent it over the cable though
 	dev_kfree_skb_any(skb);
@@ -294,6 +376,8 @@ void fakeARP_exit_module(void) {
 		//TODO: unregister all the tasklets
 		//TODO: then unregister the device
 		//TODO: also rewrite device free function so that all dynamically allocated list elements are freed
+
+		free_percpu(fakedev->lstats);
 
 		unregister_netdev(fakedev); //also free's device and priv parts since we set fakedev->destructor to free_dev
 	}
@@ -317,6 +401,8 @@ int fakeARP_init_module(void) {
 	fakedev_ndo.ndo_start_xmit = &fakeARP_tx;   //function to transmit packets to the other side of the cable
 	fakedev_ndo.ndo_open = &fakeARP_open; //function used to "up" the device, ie. when user types ifconfig fkdev0 up
 	fakedev_ndo.ndo_stop = &fakeARP_stop; //function used to "down" the device, ie. when user types ifconfig fkdev0 down
+	fakedev_ndo.ndo_get_stats64 = &fakeARP_get_stats64; //function to get per cpu stats over rtnl
+
 	fakedev->netdev_ops = &fakedev_ndo;
 
 	//adjust mac addr and device name
@@ -337,6 +423,8 @@ int fakeARP_init_module(void) {
 
 	spin_lock_init(&tmp_priv->incoming_queue_protector);
 	spin_lock_init(&tmp_priv->outgoing_queue_protector);
+
+	fakedev->lstats = alloc_percpu(struct pcpu_lstats);
 
 	//add the device to NAPI system
 	netif_napi_add(fakedev, &(tmp_priv->napi), fakeARP_poll, 16); //16 is weight used for 10M eth
