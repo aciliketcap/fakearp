@@ -362,8 +362,9 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 
 	put_cpu_ptr(fakedev->lstats);
 
-	//TODO: It appears freeing skb is not our responsibility. But I'm not sure :/
-	//TODO: We should free it here if it is our responsibility though.
+	//even if the packet is not an ARP packet we'll tell we sent it over the cable though
+	dev_kfree_skb_any(skb);
+	//we used dev_kfree_skb_any because this function may run on int time or syscall time
 
 	return NETDEV_TX_OK;
 }
