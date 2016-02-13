@@ -60,6 +60,69 @@ struct skb_list_node {
 	struct list_head node;
 };
 
+
+//TODO: take page structure from ez8139 and enter mac - ip pairs from there and test this code
+
+//for now let's start with CC:CC:CC:CC:CC:00 and increment every time we fake a new IP
+u64 next_mac = 0xCCCCCCCCCC00;
+
+//TODO: what data type kernel uses for IP and MAC internally?
+//I used byte arrays since I will be copying from buffers
+struct ip_mac_pair {
+	u8 ip[4];
+	u8 mac[6];
+	struct list_head mac_list; //for collisions
+};
+
+//TODO: implement locking for this global (for now incoming lock is enough)
+//TODO: I don't need to zero these out, they are already in BSS, right?
+static struct list_head fake_mac_list[256];
+
+//this will be used in bottom half tasklet
+u8 *insert_ip_mac_pair(u8 *ip, u8 *mac) {
+
+	struct ip_mac_pair *new_pair = kmalloc(sizeof(struct ip_mac_pair), GFP_KERNEL);
+	if(!new_pair)
+		return 0;
+
+	memcpy(new_pair->ip, ip, 4);
+	memcpy(new_pair->mac, mac, 6);
+
+//	if(!fake_mac_list[*ip]) {
+//		fake_mac_list[*ip] = &new_pair->mac_list;
+//	} else { //collision
+		printk(KERN_DEBUG "collision\n");
+		list_add(&new_pair->mac_list, &fake_mac_list[*ip]);
+//	}
+
+	return new_pair->mac;
+}
+
+//TODO: we don't need a remove_ip_hash function for now
+
+//return pointer to mac address
+u8 *get_mac(u8 *ip) {
+	struct ip_mac_pair *tmp;
+
+	if(list_empty(&fake_mac_list[*ip])) {
+		printk(KERN_DEBUG "interestingly list pointer is empty?\n");
+		return 0;
+	} else {
+		printk(KERN_DEBUG "loop da list %c\n", *ip);
+		//compare full mac, loop until we find it or list is over
+		list_for_each_entry(tmp, &fake_mac_list[*ip], mac_list) {
+			printk(KERN_DEBUG "looking at list ip %c%c%c%c and new ip %c%c%c%c\n", *tmp->ip, *tmp->ip+1,*tmp->ip+2,*tmp->ip+3,*ip,*ip+1,*ip+2,*ip+3);
+			if(memcmp(tmp->ip, ip, 4)) { //proceed to next one
+				continue;
+			} else {
+				return tmp->mac;
+			}
+		}
+	}
+
+	return 0;
+}
+
 //this just prevents cache invalidation on all cpus when one cpu updates stats
 //no performce gain since we are already locking for input / output lists
 //I wanted to try out per-cpu variables
@@ -240,6 +303,8 @@ void fakeARP(unsigned long noparam) {
 	struct skb_list_node *incoming_skb_node;
 	struct skb_list_node *next_skb; //for safe list traversal
 
+	u8 *my_mac;
+
 	spin_lock(&tmp_priv->incoming_queue_protector);
 
 	//process the list of arp requests
@@ -263,9 +328,25 @@ void fakeARP(unsigned long noparam) {
 			memcpy(data, orgdata, 42);
 			//TODO: We will hold our own fake ARP table in a later version
 			memcpy(data, orgdata+ethersrc, 6); //copy src mac to dest mac field
+
+			if((my_mac = get_mac(data+targetIP)) == 0) {
+				u32 dbg_ip;
+				memcpy(&dbg_ip, data+targetIP, 4);
+				printk(KERN_DEBUG "unable to find IP %x in IP list\n", dbg_ip); //TODO: print IP properly
+
+				u8 *next_mac_ptr = &next_mac;
+				printk(KERN_DEBUG "trying to add %x IP as MAC %llu\n", dbg_ip, next_mac);
+				if((my_mac = insert_ip_mac_pair(data+targetIP, next_mac_ptr)) == 0) {
+					//TODO: free skb, it is officially dropped now
+					printk(KERN_CRIT "unable to create new MAC for IP"); //TODO: print IP properly
+					return;
+				}
+				next_mac++;
+			}
+
 			memset(data+ethersrc, 0xcc, 6); //for now all IP owners claim their mac is cc:cc:cc:cc:cc:cc
 			*(data+ARPopts+7) = 0x02; //ARP replies have last octet of opts = 2
-			memset(data+senderMAC, 0xcc, 6); //again fake IP owner mac
+			memcpy(data+senderMAC, my_mac, 6); //again fake IP owner mac
 			memcpy(data+senderIP, orgdata+targetIP, 4); //copy asked IP addr to sender field
 			memcpy(data+targetMAC, orgdata+senderMAC, 6); //copy sender MAC to target MAC
 			memcpy(data+targetIP, orgdata+senderIP, 4); //copy sender IP to target IP
@@ -386,6 +467,7 @@ void fakeARP_exit_module(void) {
 
 int fakeARP_init_module(void) {
 	int ret = 0;
+	int i = 0;
 	struct fake_priv *tmp_priv; //after registering the device we'll access private section with this
 
 	fakedev = alloc_etherdev(sizeof(struct fake_priv)); //just like alloc_dev but uses ether_setup to adjust a few ethernet related fields afterwards
@@ -420,6 +502,10 @@ int fakeARP_init_module(void) {
 	tmp_priv->outgoing_queue.skb = NULL;
 	tmp_priv->outgoing_queue.processed = -1;
 	INIT_LIST_HEAD(&tmp_priv->outgoing_queue.node);
+
+	for(i=0;i<256;i++) {
+		INIT_LIST_HEAD(&fake_mac_list[i]);
+	}
 
 	spin_lock_init(&tmp_priv->incoming_queue_protector);
 	spin_lock_init(&tmp_priv->outgoing_queue_protector);
