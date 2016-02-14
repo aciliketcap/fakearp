@@ -1,4 +1,4 @@
-insmod fakeARP.ko
+insmod fakearp.ko
 ip ad ad 10.20.1.1/24 dev fkdev0
 ip link set fkdev0 up
 for i in $(seq 0 10);
