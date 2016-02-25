@@ -52,6 +52,8 @@ MODULE_LICENSE("GPL");
 //we will be filling targetMAC with fake MACs and 
 //make the whole packet look like it is coming from target MAC
 
+//TODO: I need to re-check all these list stuff
+//TODO: I also need a way to test it, it can't be done by using arping obviously
 //packet queue element (we are using kernel linked lists for packet queues)
 struct skb_list_node {
 	struct sk_buff *skb;
@@ -89,6 +91,7 @@ struct fake_priv {
 void fakeARP(unsigned long noparam);
 DECLARE_TASKLET(forge_fake_reply, fakeARP, 0);  //we'll forge fake ARP replies in this tasklet ie. bottom half
 
+//TODO: this is so ugly, can't I make it prettier by using macros or something?
 //struct rtnl_link_stats64* (*ndo_get_stats64) hook
 struct rtnl_link_stats64 *fakeARP_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *total_stats)
 {

@@ -1,6 +1,7 @@
 #include "fakeARP.h"
 
 #define FAKEARP_HASH_SIZE 256
+//TODO: use hlist in hash instead of list, it's half the price in memory :)
 struct list_head fake_mac_list[FAKEARP_HASH_SIZE];
 
 //hash function
