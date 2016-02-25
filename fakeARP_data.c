@@ -1,8 +1,7 @@
 #include "fakeARP.h"
 
-//TODO: take page structure from ez8139 and enter mac - ip pairs from there and test this code
-
-struct list_head fake_mac_list[256];
+#define FAKEARP_HASH_SIZE 256
+struct list_head fake_mac_list[FAKEARP_HASH_SIZE];
 
 //hash function
 struct list_head *hash_fake_mac_list(u8 *ip) {
@@ -67,21 +66,94 @@ u8 *get_mac(u8 *ip) {
 	return 0;
 }
 
-//for better debugging
-void dump_ip_list(void) {
-	struct ip_mac_pair *tmp;
-	int i;
+//use a proc entry to dump hash table entries
+void *start_fakearp_dump(struct seq_file *file, loff_t *pos)
+{
+	//alloc iterator
+	if(*pos < FAKEARP_HASH_SIZE) {
+		loff_t *spos = kmalloc(sizeof(loff_t), GFP_KERNEL);
+		if (!spos)
+			return NULL;
+		//assign initial pos
+		*spos = *pos;
+		return spos;
+	} else
+		return NULL;
+}
 
-	for(i=0;i<256;i++) {
-		if(list_empty(&fake_mac_list[i]))
-			printk(KERN_NOTICE "hash %d is empty\n", i);
-		else {
-			printk(KERN_NOTICE "IPs in hash %d\n", i);
-			list_for_each_entry(tmp, &fake_mac_list[i], mac_list) {
-				printk(KERN_NOTICE "IP %pI4 has mac %pM\n", tmp->ip, tmp->mac);
-			}
+void *next_fakearp_dump(struct seq_file *file, void *cur_it, loff_t *pos)
+{
+	loff_t *spos = cur_it;
+
+	if(*spos < FAKEARP_HASH_SIZE) {
+		*pos = ++*spos;
+		return spos;
+	} else
+		return NULL;
+}
+
+void stop_fakearp_dump(struct seq_file *file, void *cur_it) {
+	kfree(cur_it);
+}
+
+int show_fakearp_dump(struct seq_file *file, void *cur_it) {
+	struct ip_mac_pair *tmp;
+
+	//TODO: I don't understand why assign instead of casting, again.
+	loff_t *it = cur_it;
+
+	if(*it == FAKEARP_HASH_SIZE) {
+		seq_printf(file, "End of hash\n");
+		return 0;
+	}
+
+	if(list_empty(&fake_mac_list[*it]))
+		return SEQ_SKIP; //only print filled hashes
+	else {
+		seq_printf(file, "List of IPs in hash %lld\n", *it);
+		list_for_each_entry(tmp, &fake_mac_list[*it], mac_list) {
+			seq_printf(file, "IP %pI4 has mac %pM\n", tmp->ip, tmp->mac);
+			//TODO: seq_printf understands IP and mac format, right?
+			//TODO: guess not :(
+			//printk(KERN_DEBUG "IP %pI4 has mac %pM\n", tmp->ip, tmp->mac);
 		}
 	}
 
-	return;
+	return 0;
+}
+
+const struct seq_operations fakearp_dump_seq_ops = {
+	.start = start_fakearp_dump,
+	.next = next_fakearp_dump,
+	.stop = stop_fakearp_dump,
+	.show = show_fakearp_dump
+};
+
+//use seq open and iterate through hash table
+int open_fakearp_dump_entry(struct inode *inode, struct file *file)
+{
+	//TODO: may be I need to protect the list from now on...
+	return seq_open(file, &fakearp_dump_seq_ops);
+}
+
+const struct file_operations fakearp_dump_entry_fops = {
+	.owner = THIS_MODULE,
+	.open = open_fakearp_dump_entry,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release
+};
+
+//TODO: I don't think we need this either, just go with proc_create or something
+struct proc_dir_entry* create_fakearp_dump_entry()
+{
+	struct proc_dir_entry *new_fakearp_dump_entry;
+
+	new_fakearp_dump_entry = proc_create("fakearp_dump", 0, NULL, &fakearp_dump_entry_fops);
+	if(!new_fakearp_dump_entry)
+	{
+		printk(KERN_ALERT "Unable to create a proc entry to dump IP-MAC list of fakearp");
+	}
+
+	return new_fakearp_dump_entry;
 }

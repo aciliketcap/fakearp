@@ -22,3 +22,16 @@ u8 *insert_new_ip_mac_pair(u8 *ip);
 //TODO: put remove function signature here
 u8 *get_mac(u8 *ip);
 void dump_ip_list(void);
+
+//proc entry to dump IP - MAC pairs
+//TODO: this proc entry's functionality will be trasferred to sysfs later
+struct proc_dir_entry* create_fakearp_dump_entry(void);
+
+void *start_fakearp_dump(struct seq_file *file, loff_t *pos);
+void *next_fakearp_dump(struct seq_file *file, void *cur_it, loff_t *pos);
+void stop_fakearp_dump(struct seq_file *file, void *cur_it);
+int show_fakearp_dump(struct seq_file *file, void *cur_it);
+
+int show_fakearp_dump_entry(struct seq_file *file, void *seq);
+int open_fakearp_dump_entry(struct inode *inode, struct file *file);
+int close_fakearp_dump_entry(struct inode *inode, struct file *file);

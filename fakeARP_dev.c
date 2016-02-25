@@ -82,6 +82,8 @@ struct fake_priv {
 	spinlock_t incoming_queue_protector; //incoming queue protector between rx interrupt handler and tasklet
 	struct skb_list_node outgoing_queue; //outgoing skb queue
 	spinlock_t outgoing_queue_protector; //outgoing queue protector between tasklet and NAPI poller
+
+	struct proc_dir_entry *fakearp_dump_entry; //better keep a pointer to it with the device
 };
 
 void fakeARP(unsigned long noparam);
@@ -268,7 +270,7 @@ void fakeARP(unsigned long noparam) {
 			memcpy(data, orgdata+ethersrc, 6); //copy src mac to dest mac field
 
 			if((my_mac = get_mac(data+targetIP)) == 0) {
-				printk(KERN_DEBUG "unable to find IP %pI4 in IP list\n", data+targetIP);
+				printk(KERN_DEBUG "unable to find IP %pI4 in IP list, creating new IP - MAC pair\n", data+targetIP);
 				if((my_mac = insert_new_ip_mac_pair(data+targetIP)) == 0) {
 					printk(KERN_CRIT "unable to create new MAC for IP %pI4\n", data+targetIP);
 					//leave incoming in the list, may be we can do it next time. Remove failed one.
@@ -276,8 +278,6 @@ void fakeARP(unsigned long noparam) {
 
 					return;
 				}
-
-				dump_ip_list();
 
 			}
 
@@ -389,6 +389,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 
 void fakeARP_exit_module(void) {
 	if(fakedev) {
+		struct fake_priv *tmp_priv; //after registering the device we'll access private section with this
 
 		//TODO: cancel all the interrupts
 		//TODO: unregister all the tasklets
@@ -396,6 +397,10 @@ void fakeARP_exit_module(void) {
 		//TODO: also rewrite device free function so that all dynamically allocated list elements are freed
 
 		free_percpu(fakedev->lstats);
+
+		tmp_priv = netdev_priv(fakedev);
+		if(tmp_priv->fakearp_dump_entry)
+			remove_proc_entry("fakearp_dump", NULL);
 
 		unregister_netdev(fakedev); //also free's device and priv parts since we set fakedev->destructor to free_dev
 	}
@@ -459,6 +464,8 @@ int fakeARP_init_module(void) {
 		printk(KERN_CRIT "unable to register device. error code: %d\n", ret);
 		return ret;
 	}
+
+	tmp_priv->fakearp_dump_entry = create_fakearp_dump_entry();
 
 	return ret;
 }
