@@ -389,7 +389,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 
 void fakeARP_exit_module(void) {
 	if(fakedev) {
-		struct fake_priv *tmp_priv; //after registering the device we'll access private section with this
+		struct fake_priv *tmp_priv;
 
 		//TODO: cancel all the interrupts
 		//TODO: unregister all the tasklets
