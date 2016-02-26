@@ -73,7 +73,7 @@ struct pcpu_lstats {
 	struct u64_stats_sync syncp;
 };
 
-extern struct list_head fake_mac_list[256];
+extern struct hlist_head fake_mac_list[FAKEARP_HASH_SIZE];
 
 struct net_device *fakedev = 0;	//TODO: this should be placed into priv section as a list to allow multiple devices
 struct net_device_ops fakedev_ndo;
@@ -456,9 +456,8 @@ int fakeARP_init_module(void) {
 	spin_lock_init(&tmp_priv->incoming_queue_protector);
 	spin_lock_init(&tmp_priv->outgoing_queue_protector);
 
-	//TODO: write this as a function, no magic 256 and use hlists!
-	for(i=0;i<256;i++) {
-		INIT_LIST_HEAD(&fake_mac_list[i]);
+	for(i=0;i<FAKEARP_HASH_SIZE;i++) {
+		INIT_HLIST_HEAD(&fake_mac_list[i]);
 	}
 	//TODO: init hash table lock here
 
