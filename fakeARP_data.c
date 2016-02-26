@@ -112,9 +112,6 @@ int show_fakearp_dump(struct seq_file *file, void *cur_it) {
 		seq_printf(file, "List of IPs in hash %lld\n", *it);
 		hlist_for_each_entry(tmp, &fake_mac_list[*it], mac_list) {
 			seq_printf(file, "IP %pI4 has mac %pM\n", tmp->ip, tmp->mac);
-			//TODO: seq_printf understands IP and mac format, right?
-			//TODO: guess not :(
-			//printk(KERN_DEBUG "IP %pI4 has mac %pM\n", tmp->ip, tmp->mac);
 		}
 	}
 
