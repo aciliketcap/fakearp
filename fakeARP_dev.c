@@ -196,26 +196,24 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 
 	list_for_each_entry_safe(outgoing_skb, next_skb, &tmp_priv->outgoing_queue.node, node) 	{
 		if(budget > 0) {
-			if(outgoing_skb->skb != NULL) { //don't delete the starting node, we use it to access the queue!
-				printk(KERN_DEBUG "here is the fake ARP reply I'll feed to NAPI :\n");
-				print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, outgoing_skb->skb->data, outgoing_skb->skb->len, true); //print_hex_dump_bytes modified
+			printk(KERN_DEBUG "here is the fake ARP reply I'll feed to NAPI :\n");
+			print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, outgoing_skb->skb->data, outgoing_skb->skb->len, true); //print_hex_dump_bytes modified
 
-				ret = netif_receive_skb(outgoing_skb->skb);	//give the fake ARP reply to kernel
+			ret = netif_receive_skb(outgoing_skb->skb); //give the fake ARP reply to kernel
 
-				if(ret==NET_RX_SUCCESS) {
-					printk(KERN_INFO "fake arp reply skb fed to NAPI\n");
+			if(ret==NET_RX_SUCCESS) {
+				printk(KERN_INFO "fake arp reply skb fed to NAPI\n");
 
-					//just for 64bit per cpu variables if we are on 32 bit arch
-					u64_stats_update_begin(&tc_stats->syncp);
-					tc_stats->rx_bytes += outgoing_skb->skb->len;
-					tc_stats->rx_packets++;
-					u64_stats_update_end(&tc_stats->syncp);
+				//just for 64bit per cpu variables if we are on 32 bit arch
+				u64_stats_update_begin(&tc_stats->syncp);
+				tc_stats->rx_bytes += outgoing_skb->skb->len;
+				tc_stats->rx_packets++;
+				u64_stats_update_end(&tc_stats->syncp);
 
-					budget--;
+				budget--;
 
-					//just delete the node, don't delete the skb!
-					list_del(&outgoing_skb->node);
-				}
+				//just delete the node, don't delete the skb!
+				list_del(&outgoing_skb->node);
 			}
 		} else {
 			poll_ret = 1;
@@ -252,68 +250,70 @@ void fakeARP(unsigned long noparam) {
 
 	//process the list of arp requests
 	list_for_each_entry_safe(incoming_skb_node, next_skb, &tmp_priv->incoming_queue.node, node) {
-		if(incoming_skb_node->skb != NULL) {
-			struct sk_buff *fake_skb = alloc_skb(42, GFP_KERNEL); //allocate a new skb for fake ARP response
-			if(fake_skb==NULL) {
-				printk(KERN_CRIT "unable to allocate new skb for the fake ARP packet\n");
-				break;
-			}
-			skb_put(fake_skb, 42); //create enough data section for fake ARP packet
-			memset(fake_skb, 0, 42); //zero it out
-
-			orgdata = incoming_skb_node->skb->data; //original data section in the ARP request
-
-			printk(KERN_DEBUG "beginning to forge fake ARP reply\n");
-			data = fake_skb->data;
-
-			//we'll fill data part with a valid ARP reply using the info in the ARP request
-			//copy all data section first, then swap and change necessary fields
-			memcpy(data, orgdata, 42);
-			//TODO: We will hold our own fake ARP table in a later version
-			memcpy(data, orgdata+ethersrc, 6); //copy src mac to dest mac field
-
-			if((my_mac = get_mac(data+targetIP)) == 0) {
-				printk(KERN_DEBUG "unable to find IP %pI4 in IP list, creating new IP - MAC pair\n", data+targetIP);
-				if((my_mac = insert_new_ip_mac_pair(data+targetIP)) == 0) {
-					printk(KERN_CRIT "unable to create new MAC for IP %pI4\n", data+targetIP);
-					//leave incoming in the list, may be we can do it next time. Remove failed one.
-					kfree_skb(fake_skb);
-
-					return;
-				}
-
-			}
-
-			memset(data+ethersrc, 0xcc, 6); //for now all IP owners claim their mac is cc:cc:cc:cc:cc:cc
-			*(data+ARPopts+7) = 0x02; //ARP replies have last octet of opts = 2
-			memcpy(data+senderMAC, my_mac, 6); //again fake IP owner mac
-			memcpy(data+senderIP, orgdata+targetIP, 4); //copy asked IP addr to sender field
-			memcpy(data+targetMAC, orgdata+senderMAC, 6); //copy sender MAC to target MAC
-			memcpy(data+targetIP, orgdata+senderIP, 4); //copy sender IP to target IP
-
-			//that's it, let's see our forged packet
-			printk(KERN_DEBUG "here is the fake ARP reply I forged:\n");
-			print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, fake_skb->data, fake_skb->len, true); //print_hex_dump_bytes modified
-
-
-			//add fake_skb to outgoing queue
-			outgoing_skb_node = (struct skb_list_node*) kmalloc(sizeof(struct skb_list_node), GFP_KERNEL); //TODO: what if allocation fails here?
-			outgoing_skb_node->skb = fake_skb;
-			printk(KERN_DEBUG "new fake skb is ready to give\n");
-
-			outgoing_skb_node->skb->protocol = eth_type_trans(outgoing_skb_node->skb, fakedev);
-			//we need to call this before handing the packet over to kernel,
-			//it fixes head, data, mac etc. fields in the skb so that it seems like an ethernet packet
-			__net_timestamp(outgoing_skb_node->skb); //as if we just got it fresh, without a timestamp
-
-			spin_lock(&tmp_priv->outgoing_queue_protector);
-			list_add(&outgoing_skb_node->node, &tmp_priv->outgoing_queue.node);
-			spin_unlock(&tmp_priv->outgoing_queue_protector);
-
-			//we are done with the skb
-			kfree(incoming_skb_node->skb);
-			list_del(&incoming_skb_node->node);
+		struct sk_buff *fake_skb = alloc_skb(42, GFP_KERNEL); //allocate a new skb for fake ARP response
+		if(!fake_skb) {
+			printk(KERN_CRIT "unable to allocate new skb for the fake ARP packet\n");
+			break;
 		}
+		skb_put(fake_skb, 42); //create enough data section for fake ARP packet
+		memset(fake_skb, 0, 42); //zero it out
+
+		orgdata = incoming_skb_node->skb->data; //original data section in the ARP request
+
+		printk(KERN_DEBUG "beginning to forge fake ARP reply\n");
+		data = fake_skb->data;
+
+		//we'll fill data part with a valid ARP reply using the info in the ARP request
+		//copy all data section first, then swap and change necessary fields
+		memcpy(data, orgdata, 42);
+		//TODO: We will hold our own fake ARP table in a later version
+		memcpy(data, orgdata+ethersrc, 6); //copy src mac to dest mac field
+
+		if((my_mac = get_mac(data+targetIP)) == 0) {
+			printk(KERN_DEBUG "unable to find IP %pI4 in IP list, creating new IP - MAC pair\n", data+targetIP);
+			if((my_mac = insert_new_ip_mac_pair(data+targetIP)) == 0) {
+				printk(KERN_CRIT "unable to create new MAC for IP %pI4\n", data+targetIP);
+				//leave incoming in the list, may be we can do it next time. Remove failed one.
+				kfree_skb(fake_skb);
+
+				return;
+			}
+		}
+
+		memset(data+ethersrc, 0xcc, 6); //for now all IP owners claim their mac is cc:cc:cc:cc:cc:cc
+		*(data+ARPopts+7) = 0x02; //ARP replies have last octet of opts = 2
+		memcpy(data+senderMAC, my_mac, 6); //again fake IP owner mac
+		memcpy(data+senderIP, orgdata+targetIP, 4); //copy asked IP addr to sender field
+		memcpy(data+targetMAC, orgdata+senderMAC, 6); //copy sender MAC to target MAC
+		memcpy(data+targetIP, orgdata+senderIP, 4); //copy sender IP to target IP
+
+		//that's it, let's see our forged packet
+		printk(KERN_DEBUG "here is the fake ARP reply I forged:\n");
+		print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, fake_skb->data, fake_skb->len, true); //print_hex_dump_bytes modified
+
+		//add fake_skb to outgoing queue
+		outgoing_skb_node = (struct skb_list_node*) kmalloc(sizeof(struct skb_list_node), GFP_KERNEL);
+		if(!outgoing_skb_node) {
+			printk(KERN_CRIT "unable to allocate new list element for the fake ARP packet\n");
+			break;
+		}
+
+		outgoing_skb_node->skb = fake_skb;
+		printk(KERN_DEBUG "new fake skb is ready to give\n");
+
+		outgoing_skb_node->skb->protocol = eth_type_trans(outgoing_skb_node->skb, fakedev);
+		//we need to call this before handing the packet over to kernel,
+		//it fixes head, data, mac etc. fields in the skb so that it seems like an ethernet packet
+		__net_timestamp(outgoing_skb_node->skb); //as if we just got it fresh, without a timestamp
+
+		//TODO: can this cause a deadlock somehow?
+		spin_lock(&tmp_priv->outgoing_queue_protector);
+		list_add_tail(&outgoing_skb_node->node, &tmp_priv->outgoing_queue.node);
+		spin_unlock(&tmp_priv->outgoing_queue_protector);
+
+		//we are done with the incoming skb
+		kfree(incoming_skb_node->skb);
+		list_del(&incoming_skb_node->node);
 	}
 
 	spin_unlock(&tmp_priv->incoming_queue_protector);
@@ -344,6 +344,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	printk(KERN_DEBUG "I have received a packet:\n");
         print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, skb->data, skb->len, true); //print_hex_dump_bytes modified
 
+	//TODO: use a function which tells if packet is ARP request or not, instead of nested if statements
 	//check if the packet is an ARP packet
 	if(data[isitARP]==0x08 && data[isitARP+1]==0x06) { //2 octet long ethernet packet type part. 0x0806 is ARP
 		//check if it is an ARP request
@@ -356,21 +357,27 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 				if(!incoming_skb) {
 					printk(KERN_CRIT "failed to clone skb for forging\n");
 					spin_unlock(&tmp_priv->incoming_queue_protector);
-					return NETDEV_TX_BUSY; //if cloning fails give the packet back
+					goto busy; //if cloning fails give the packet back
 				}
 
 				incoming_skb_node = kmalloc(sizeof(struct skb_list_node), GFP_ATOMIC);
+				if(!incoming_skb_node) {
+					printk(KERN_CRIT "failed to clone list node for forging\n");
+					spin_unlock(&tmp_priv->incoming_queue_protector);
+					goto busy; //if allocation fails give the packet back
+				}
+
 				incoming_skb_node->skb = incoming_skb;
 				incoming_skb_node->processed = 0;
 
-				list_add(&incoming_skb_node->node, &(tmp_priv->incoming_queue.node));
+				list_add_tail(&incoming_skb_node->node, &(tmp_priv->incoming_queue.node)); //add to the end of list
 				spin_unlock(&tmp_priv->incoming_queue_protector);
 
 				//forger tasklet will take care of the rest
 				tasklet_schedule(&forge_fake_reply);
 			} else {
 				//queue is being used by the tasklet or another interrupt
-				return NETDEV_TX_BUSY;
+				goto busy;
 			}
 		}
 	}
@@ -388,6 +395,9 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	//we used dev_kfree_skb_any because this function may run on int time or syscall time
 
 	return NETDEV_TX_OK;
+busy:
+	put_cpu_ptr(fakedev->lstats);
+	return NETDEV_TX_BUSY;
 }
 
 void fakeARP_exit_module(void) {
@@ -440,20 +450,17 @@ int fakeARP_init_module(void) {
 	tmp_priv = netdev_priv(fakedev); //now that we allocated the space, we can access our private section
 
 	//init incoming packet queues and queue protectors
-	tmp_priv->incoming_queue.skb = NULL; //queue head will always point to NULL
-	tmp_priv->incoming_queue.processed = -1; //queue head will never be processed
 	INIT_LIST_HEAD(&tmp_priv->incoming_queue.node);
-
-	tmp_priv->outgoing_queue.skb = NULL;
-	tmp_priv->outgoing_queue.processed = -1;
 	INIT_LIST_HEAD(&tmp_priv->outgoing_queue.node);
-
-	for(i=0;i<256;i++) {
-		INIT_LIST_HEAD(&fake_mac_list[i]);
-	}
 
 	spin_lock_init(&tmp_priv->incoming_queue_protector);
 	spin_lock_init(&tmp_priv->outgoing_queue_protector);
+
+	//TODO: write this as a function, no magic 256 and use hlists!
+	for(i=0;i<256;i++) {
+		INIT_LIST_HEAD(&fake_mac_list[i]);
+	}
+	//TODO: init hash table lock here
 
 	fakedev->lstats = alloc_percpu(struct pcpu_lstats);
 
