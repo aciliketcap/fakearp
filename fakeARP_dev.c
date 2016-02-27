@@ -282,6 +282,18 @@ void fakeARP(unsigned long noparam) {
 	return;   //success
 }
 
+int is_ARP_request(__u8 *data) {
+	//check if the packet is an ARP packet
+	if(data[isitARP]==0x08 && data[isitARP+1]==0x06) { //2 octet long ethernet packet type part. 0x0806 is ARP
+		//check if it is an ARP request
+		if(data[ARPopts+6]==0x00 && data[ARPopts+7]==0x01) { //opcode 0x0001 is request, 0x0002 is reply
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 //netdev_tx_t (*ndo_start_xmit) (struct sk_buff *skb, struct net_device *dev) hook
 //enum netdev_tx_t is defined in netdevice.h
 netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
@@ -303,41 +315,35 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	debug_hex_dump(skb->data, skb->len);
 #endif
 
-	//TODO: use a function which tells if packet is ARP request or not, instead of nested if statements
-	//check if the packet is an ARP packet
-	if(data[isitARP]==0x08 && data[isitARP+1]==0x06) { //2 octet long ethernet packet type part. 0x0806 is ARP
-		//check if it is an ARP request
-		if(data[ARPopts+6]==0x00 && data[ARPopts+7]==0x01) { //opcode 0x0001 is request, 0x0002 is reply
+	if(is_ARP_request(data)) {
+		//try to add skb to the list
+		if(spin_trylock(&tmp_priv->incoming_queue_protector)) {
 
-			//try to add skb to the list
-			if(spin_trylock(&tmp_priv->incoming_queue_protector)) {
-
-				struct sk_buff *incoming_skb = skb_clone(skb, GFP_ATOMIC);
-				if(!incoming_skb) {
-					printk(KERN_CRIT "failed to clone skb for forging\n");
-					spin_unlock(&tmp_priv->incoming_queue_protector);
-					goto busy; //if cloning fails give the packet back
-				}
-
-				incoming_skb_node = kmalloc(sizeof(struct skb_list_node), GFP_ATOMIC);
-				if(!incoming_skb_node) {
-					printk(KERN_CRIT "failed to clone list node for forging\n");
-					spin_unlock(&tmp_priv->incoming_queue_protector);
-					goto busy; //if allocation fails give the packet back
-				}
-
-				incoming_skb_node->skb = incoming_skb;
-				incoming_skb_node->processed = 0;
-
-				list_add_tail(&incoming_skb_node->node, &(tmp_priv->incoming_queue.node)); //add to the end of list
+			struct sk_buff *incoming_skb = skb_clone(skb, GFP_ATOMIC);
+			if(!incoming_skb) {
+				printk(KERN_CRIT "failed to clone skb for forging\n");
 				spin_unlock(&tmp_priv->incoming_queue_protector);
-
-				//forger tasklet will take care of the rest
-				tasklet_schedule(&forge_fake_reply);
-			} else {
-				//queue is being used by the tasklet or another interrupt
-				goto busy;
+				goto busy; //if cloning fails give the packet back
 			}
+
+			incoming_skb_node = kmalloc(sizeof(struct skb_list_node), GFP_ATOMIC);
+			if(!incoming_skb_node) {
+				printk(KERN_CRIT "failed to clone list node for forging\n");
+				spin_unlock(&tmp_priv->incoming_queue_protector);
+				goto busy; //if allocation fails give the packet back
+			}
+
+			incoming_skb_node->skb = incoming_skb;
+			incoming_skb_node->processed = 0;
+
+			list_add_tail(&incoming_skb_node->node, &(tmp_priv->incoming_queue.node)); //add to the end of list
+			spin_unlock(&tmp_priv->incoming_queue_protector);
+
+			//forger tasklet will take care of the rest
+			tasklet_schedule(&forge_fake_reply);
+		} else {
+			//queue is being used by the tasklet or another interrupt
+			goto busy;
 		}
 	}
 
