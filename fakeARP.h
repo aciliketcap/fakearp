@@ -2,6 +2,7 @@
 #include <linux/seq_file.h> //print output using procfs
 #include <linux/kernel.h> //for printk and other stuff
 #include <linux/slab.h> //kmalloc and kfree
+#include <linux/spinlock.h> //we can't use any other mechanism since we will be locking at interrupt time mostly.
 #include <linux/percpu.h> //per-cpu variables for holding stats
 #include <linux/u64_stats_sync.h> //to sync 64bit per-cpu variables on 32bit archs
 
@@ -33,6 +34,7 @@ struct pcpu_lstats {
 //TODO: I don't need to zero these out, they are already in BSS, right?
 //very simple hash table implementation
 extern struct hlist_head fake_mac_list[FAKEARP_HASH_SIZE];
+extern spinlock_t fake_mac_list_protector;
 
 //TODO: what data type kernel uses for IP and MAC internally?
 //I used byte arrays since I will be copying from buffers

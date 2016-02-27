@@ -1,7 +1,9 @@
 #include "fakeARP.h"
 
+//TODO: may be I should make hash table per-device instead of global
 //use hlist in hash instead of list and initial hash table will cost half the mem price
 struct hlist_head fake_mac_list[FAKEARP_HASH_SIZE];
+spinlock_t fake_mac_list_protector;
 
 //hash function
 struct hlist_head *hash_fake_mac_list(u8 *ip) {
@@ -19,7 +21,9 @@ u8 *insert_ip_mac_pair(u8 *ip, u8 *mac) {
 	memcpy(new_pair->ip, ip, 4);
 	memcpy(new_pair->mac, mac, 6);
 
+	spin_lock(&fake_mac_list_protector);
 	hlist_add_head(&new_pair->mac_list, hash_fake_mac_list(ip));
+	spin_unlock(&fake_mac_list_protector);
 
 	return new_pair->mac;
 }
@@ -44,9 +48,9 @@ u8 *insert_new_ip_mac_pair(u8 *ip) {
 u8 *get_mac(u8 *ip) {
 	struct ip_mac_pair *tmp;
 
+	spin_lock(&fake_mac_list_protector);
 	if(hlist_empty(hash_fake_mac_list(ip))) {
-		printk(KERN_DEBUG "No MAC recorded for IP %pI4 before\n", ip);
-		return 0;
+		goto no_mac;
 	} else {
 		//compare full mac, loop until we find it or list is over
 		hlist_for_each_entry(tmp, hash_fake_mac_list(ip), mac_list) {
@@ -57,13 +61,15 @@ u8 *get_mac(u8 *ip) {
 			if(memcmp(tmp->ip, ip, 4)) { //proceed to next one if cmp fails
 				continue;
 			} else {
+				spin_lock(&fake_mac_list_protector);
 				return tmp->mac;
 			}
 		}
 	}
 
+no_mac:
 	printk(KERN_DEBUG "No MAC recorded for IP %pI4 before\n", ip);
-
+	spin_unlock(&fake_mac_list_protector);
 	return 0;
 }
 
@@ -108,6 +114,7 @@ int show_fakearp_dump(struct seq_file *file, void *cur_it) {
 		return 0;
 	}
 
+	spin_lock(&fake_mac_list_protector);
 	if(hlist_empty(&fake_mac_list[*it]))
 		return SEQ_SKIP; //only print filled hashes
 	else {
@@ -116,6 +123,7 @@ int show_fakearp_dump(struct seq_file *file, void *cur_it) {
 			seq_printf(file, "IP %pI4 has mac %pM\n", tmp->ip, tmp->mac);
 		}
 	}
+	spin_unlock(&fake_mac_list_protector);
 
 	return 0;
 }

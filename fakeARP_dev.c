@@ -29,7 +29,6 @@
 #include <linux/netdevice.h> //almost every struct, mainly net_device and associated functions
 #include <linux/etherdevice.h> //alloc_etherdev
 #include <linux/skbuff.h> //for skb structs and associated functions
-#include <linux/spinlock.h> //we can't use any other mechanism since we will be locking at interrupt time mostly.
 #include <linux/interrupt.h> //for using tasklets as a bottom-half mechanism
 
 #include "fakeARP.h"
@@ -423,7 +422,7 @@ int fakeARP_init_module(void) {
 	for(i=0;i<FAKEARP_HASH_SIZE;i++) {
 		INIT_HLIST_HEAD(&fake_mac_list[i]);
 	}
-	//TODO: init hash table lock here
+	spin_lock_init(&fake_mac_list_protector);
 
 	fakedev->lstats = alloc_percpu(struct pcpu_lstats);
 
