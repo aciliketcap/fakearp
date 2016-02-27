@@ -7,7 +7,7 @@
 
 //extra debugging which just dumps lots of lines to show how stuff works
 //I'd make this config option if I wasn't compiling in my own directory
-#define FAKEARP_EXTRA_DEBUG
+//#define FAKEARP_EXTRA_DEBUG
 #define debug_hex_dump(obj,len)	print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, obj, len, true);
 
 #ifdef FAKEARP_EXTRA_DEBUG
