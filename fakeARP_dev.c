@@ -31,8 +31,6 @@
 #include <linux/skbuff.h> //for skb structs and associated functions
 #include <linux/spinlock.h> //we can't use any other mechanism since we will be locking at interrupt time mostly.
 #include <linux/interrupt.h> //for using tasklets as a bottom-half mechanism
-#include <linux/percpu.h> //per-cpu variables for holding stats
-#include <linux/u64_stats_sync.h> //to sync 64bit per-cpu variables on 32bit archs
 
 #include "fakeARP.h"
 
@@ -61,18 +59,6 @@ struct skb_list_node {
 	struct list_head node;
 };
 
-//this just prevents cache invalidation on all cpus when one cpu updates stats
-//no performce gain since we are already locking for input / output lists
-//I wanted to try out per-cpu variables
-struct pcpu_lstats {
-	u64 rx_packets;
-	u64 tx_packets;
-	u64 rx_bytes;
-	u64 tx_bytes;
-	u64 tx_dropped;
-	struct u64_stats_sync syncp;
-};
-
 extern struct hlist_head fake_mac_list[FAKEARP_HASH_SIZE];
 
 struct net_device *fakedev = 0;	//TODO: this should be placed into priv section as a list to allow multiple devices
@@ -91,56 +77,24 @@ struct fake_priv {
 void fakeARP(unsigned long noparam);
 DECLARE_TASKLET(forge_fake_reply, fakeARP, 0);  //we'll forge fake ARP replies in this tasklet ie. bottom half
 
-//TODO: this is so ugly, can't I make it prettier by using macros or something?
 //struct rtnl_link_stats64* (*ndo_get_stats64) hook
-struct rtnl_link_stats64 *fakeARP_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *total_stats)
-{
-	u64 total_rx_packets = 0;
-	u64 total_tx_packets = 0;
-	u64 total_rx_bytes = 0;
-	u64 total_tx_bytes = 0;
-	u64 total_tx_dropped = 0;
+struct rtnl_link_stats64 *fakeARP_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *total_stats) {
 	int i;
 
 	for_each_possible_cpu(i) {
 		const struct pcpu_lstats *tc_stats; //this cpu's stats
-		u64 tc_rx_packets, tc_tx_packets, tc_rx_bytes, tc_tx_bytes, tc_tx_dropped; //this cpu's packet and byte counts
 		unsigned int start; //for sync
 
 		tc_stats = per_cpu_ptr(dev->lstats, i);
 		do {
 			start = u64_stats_fetch_begin_bh(&tc_stats->syncp);
-			tc_rx_packets = tc_stats->rx_packets;
-			tc_tx_packets = tc_stats->tx_packets;
-			tc_rx_bytes = tc_stats->rx_bytes;
-			tc_tx_bytes = tc_stats->tx_bytes;
-			tc_tx_dropped = tc_stats->tx_dropped;
+			total_stats->rx_packets += tc_stats->rx_packets;
+			total_stats->tx_packets += tc_stats->tx_packets;
+			total_stats->rx_bytes += tc_stats->rx_bytes;
+			total_stats->tx_bytes += tc_stats->tx_bytes;
+			total_stats->tx_dropped += tc_stats->tx_dropped;
 		} while (u64_stats_fetch_retry_bh(&tc_stats->syncp, start));
-
-		printk(KERN_DEBUG "rx packets for cpu %d: %llu\n", i, tc_rx_packets);
-		printk(KERN_DEBUG "tx packets for cpu %d: %llu\n", i, tc_tx_packets);
-		printk(KERN_DEBUG "rx bytes for cpu %d: %llu\n", i, tc_rx_bytes);
-		printk(KERN_DEBUG "tx bytes for cpu %d: %llu\n", i, tc_tx_bytes);
-		printk(KERN_DEBUG "tx drops for cpu %d: %llu\n", i, tc_tx_dropped);
-
-		total_rx_packets += tc_rx_packets;
-		total_tx_packets += tc_tx_packets;
-		total_rx_bytes   += tc_rx_bytes;
-		total_tx_bytes   += tc_tx_bytes;
-		total_tx_dropped += tc_tx_dropped;
 	}
-
-	printk(KERN_DEBUG "rx packets total: %llu\n", total_rx_packets);
-	printk(KERN_DEBUG "tx packets total: %llu\n", total_tx_packets);
-	printk(KERN_DEBUG "rx bytes total: %llu\n", total_rx_bytes);
-	printk(KERN_DEBUG "tx bytes total: %llu\n", total_tx_bytes);
-	printk(KERN_DEBUG "tx drops total: %llu\n", total_tx_dropped);
-
-	total_stats->rx_packets = total_rx_packets;
-	total_stats->tx_packets = total_tx_packets;
-	total_stats->rx_bytes   = total_rx_bytes;
-	total_stats->tx_bytes   = total_tx_bytes;
-	total_stats->tx_dropped = total_tx_dropped;
 
 	return total_stats;
 }
@@ -196,8 +150,11 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 
 	list_for_each_entry_safe(outgoing_skb, next_skb, &tmp_priv->outgoing_queue.node, node) 	{
 		if(budget > 0) {
+#ifdef FAKEARP_EXTRA_DEBUG
 			printk(KERN_DEBUG "here is the fake ARP reply I'll feed to NAPI :\n");
-			print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, outgoing_skb->skb->data, outgoing_skb->skb->len, true); //print_hex_dump_bytes modified
+			//print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, outgoing_skb->skb->data, outgoing_skb->skb->len, true); //print_hex_dump_bytes modified
+			debug_hex_dump(outgoing_skb->skb->data, outgoing_skb->skb->len);
+#endif
 
 			ret = netif_receive_skb(outgoing_skb->skb); //give the fake ARP reply to kernel
 
@@ -287,10 +244,11 @@ void fakeARP(unsigned long noparam) {
 		memcpy(data+targetMAC, orgdata+senderMAC, 6); //copy sender MAC to target MAC
 		memcpy(data+targetIP, orgdata+senderIP, 4); //copy sender IP to target IP
 
+#ifdef FAKEARP_EXTRA_DEBUG
 		//that's it, let's see our forged packet
 		printk(KERN_DEBUG "here is the fake ARP reply I forged:\n");
-		print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, fake_skb->data, fake_skb->len, true); //print_hex_dump_bytes modified
-
+		debug_hex_dump(fake_skb->data, fake_skb->len);
+#endif
 		//add fake_skb to outgoing queue
 		outgoing_skb_node = (struct skb_list_node*) kmalloc(sizeof(struct skb_list_node), GFP_KERNEL);
 		if(!outgoing_skb_node) {
@@ -340,9 +298,11 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	len = skb->len;
 	data = skb->data;
 
+#ifdef FAKEARP_EXTRA_DEBUG
 	//let's see what they want us to send (for debug)
 	printk(KERN_DEBUG "I have received a packet:\n");
-        print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, skb->data, skb->len, true); //print_hex_dump_bytes modified
+	debug_hex_dump(skb->data, skb->len);
+#endif
 
 	//TODO: use a function which tells if packet is ARP request or not, instead of nested if statements
 	//check if the packet is an ARP packet
@@ -438,7 +398,11 @@ int fakeARP_init_module(void) {
 	fakedev_ndo.ndo_start_xmit = &fakeARP_tx;   //function to transmit packets to the other side of the cable
 	fakedev_ndo.ndo_open = &fakeARP_open; //function used to "up" the device, ie. when user types ifconfig fkdev0 up
 	fakedev_ndo.ndo_stop = &fakeARP_stop; //function used to "down" the device, ie. when user types ifconfig fkdev0 down
+#ifndef FAKEARP_EXTRA_DEBUG
 	fakedev_ndo.ndo_get_stats64 = &fakeARP_get_stats64; //function to get per cpu stats over rtnl
+#else
+	fakedev_ndo.ndo_get_stats64 = &fakeARP_get_stats64_extra_debug; //this one printks stats for each cpu
+#endif
 
 	fakedev->netdev_ops = &fakedev_ndo;
 

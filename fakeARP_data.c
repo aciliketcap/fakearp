@@ -50,7 +50,9 @@ u8 *get_mac(u8 *ip) {
 	} else {
 		//compare full mac, loop until we find it or list is over
 		hlist_for_each_entry(tmp, hash_fake_mac_list(ip), mac_list) {
+#ifdef FAKEARP_EXTRA_DEBUG
 			printk(KERN_DEBUG "looking at list ip %pI4 and new ip %pI4\n", tmp->ip, ip);
+#endif
 
 			if(memcmp(tmp->ip, ip, 4)) { //proceed to next one if cmp fails
 				continue;

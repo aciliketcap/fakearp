@@ -2,6 +2,29 @@
 #include <linux/seq_file.h> //print output using procfs
 #include <linux/kernel.h> //for printk and other stuff
 #include <linux/slab.h> //kmalloc and kfree
+#include <linux/percpu.h> //per-cpu variables for holding stats
+#include <linux/u64_stats_sync.h> //to sync 64bit per-cpu variables on 32bit archs
+
+//extra debugging which just dumps lots of lines to show how stuff works
+//I'd make this config option if I wasn't compiling in my own directory
+#define FAKEARP_EXTRA_DEBUG
+#define debug_hex_dump(obj,len)	print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, obj, len, true);
+
+#ifdef FAKEARP_EXTRA_DEBUG
+struct rtnl_link_stats64 *fakeARP_get_stats64_extra_debug(struct net_device *dev, struct rtnl_link_stats64 *total_stats);
+#endif
+
+//this just prevents cache invalidation on all cpus when one cpu updates stats
+//no performce gain since we are already locking for input / output lists
+//I wanted to try out per-cpu variables
+struct pcpu_lstats {
+	u64 rx_packets;
+	u64 tx_packets;
+	u64 rx_bytes;
+	u64 tx_bytes;
+	u64 tx_dropped;
+	struct u64_stats_sync syncp;
+};
 
 #define FIRST_MAC 0xCCCCCCCCCC00
 
