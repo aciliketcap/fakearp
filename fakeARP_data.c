@@ -83,6 +83,7 @@ void *start_fakearp_dump(struct seq_file *file, loff_t *pos)
 			return NULL;
 		//assign initial pos
 		*spos = *pos;
+		spin_lock(&fake_mac_list_protector); //lock here, unlock at stop
 		return spos;
 	} else
 		return NULL;
@@ -100,6 +101,7 @@ void *next_fakearp_dump(struct seq_file *file, void *cur_it, loff_t *pos)
 }
 
 void stop_fakearp_dump(struct seq_file *file, void *cur_it) {
+	spin_unlock(&fake_mac_list_protector);
 	kfree(cur_it);
 }
 
@@ -114,7 +116,6 @@ int show_fakearp_dump(struct seq_file *file, void *cur_it) {
 		return 0;
 	}
 
-	spin_lock(&fake_mac_list_protector);
 	if(hlist_empty(&fake_mac_list[*it]))
 		return SEQ_SKIP; //only print filled hashes
 	else {
@@ -123,7 +124,6 @@ int show_fakearp_dump(struct seq_file *file, void *cur_it) {
 			seq_printf(file, "IP %pI4 has mac %pM\n", tmp->ip, tmp->mac);
 		}
 	}
-	spin_unlock(&fake_mac_list_protector);
 
 	return 0;
 }
