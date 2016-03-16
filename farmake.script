@@ -1,1 +1,1 @@
-make -C kerneldir/ M=$(pwd) modules
+make -C kerneldir/ M=$(pwd) modules && ./cp2vm
