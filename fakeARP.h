@@ -5,6 +5,7 @@
 #include <linux/spinlock.h> //we can't use any other mechanism since we will be locking at interrupt time mostly.
 #include <linux/percpu.h> //per-cpu variables for holding stats
 #include <linux/u64_stats_sync.h> //to sync 64bit per-cpu variables on 32bit archs
+#include <asm/uaccess.h> //copy_to_user, copy_from_user userspace access functions
 
 //extra debugging which just dumps lots of lines to show how stuff works
 //I'd make this config option if I wasn't compiling in my own directory
@@ -30,6 +31,9 @@ struct pcpu_lstats {
 #define FIRST_MAC 0xCCCCCCCCCC00
 
 #define FAKEARP_HASH_SIZE 256
+
+#define FAKEARP_IPMAC_STRING_MAX_LEN 34 //format x.x.x.x-aa:aa:aa:aa:aa:aa
+
 //TODO: implement locking for this global (for now incoming lock is enough)
 //TODO: I don't need to zero these out, they are already in BSS, right?
 //very simple hash table implementation
@@ -51,8 +55,9 @@ u8 *insert_new_ip_mac_pair(u8 *ip);
 u8 *get_mac(u8 *ip);
 void dump_ip_list(void);
 
+//TODO: these proc entry functionalities will be trasferred to sysfs and netlink later
+
 //proc entry to dump IP - MAC pairs
-//TODO: this proc entry's functionality will be trasferred to sysfs later
 struct proc_dir_entry* create_fakearp_dump_entry(void);
 
 void *start_fakearp_dump(struct seq_file *file, loff_t *pos);
@@ -63,3 +68,7 @@ int show_fakearp_dump(struct seq_file *file, void *cur_it);
 int show_fakearp_dump_entry(struct seq_file *file, void *seq);
 int open_fakearp_dump_entry(struct inode *inode, struct file *file);
 int close_fakearp_dump_entry(struct inode *inode, struct file *file);
+
+//proc entry to add new IP - MAC pairs
+struct proc_dir_entry* create_fakearp_new_pair_entry(void);
+ssize_t write_fakearp_new_pair_entry(struct file *file, const char *buffer, size_t count, loff_t *pos);

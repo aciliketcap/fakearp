@@ -70,7 +70,9 @@ struct fake_priv {
 	struct skb_list_node outgoing_queue; //outgoing skb queue
 	spinlock_t outgoing_queue_protector; //outgoing queue protector between tasklet and NAPI poller
 
-	struct proc_dir_entry *fakearp_dump_entry; //better keep a pointer to it with the device
+	//keep pointers in priv so that we can remove them on exit
+	struct proc_dir_entry *fakearp_dump_entry;
+	struct proc_dir_entry *fakearp_new_pair_entry;
 };
 
 void fakeARP(unsigned long noparam);
@@ -380,6 +382,9 @@ void fakeARP_exit_module(void) {
 		if(tmp_priv->fakearp_dump_entry)
 			remove_proc_entry("fakearp_dump", NULL);
 
+		if(tmp_priv->fakearp_new_pair_entry)
+			remove_proc_entry("fakearp_new_pair", NULL);
+
 		unregister_netdev(fakedev); //also free's device and priv parts since we set fakedev->destructor to free_dev
 	}
 	return;
@@ -444,6 +449,9 @@ int fakeARP_init_module(void) {
 	}
 
 	tmp_priv->fakearp_dump_entry = create_fakearp_dump_entry();
+
+	printk(KERN_DEBUG "add new proc entry for new pairs\n");
+	tmp_priv->fakearp_new_pair_entry = create_fakearp_new_pair_entry();
 
 	return ret;
 }

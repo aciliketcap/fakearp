@@ -13,6 +13,7 @@ struct hlist_head *hash_fake_mac_list(u8 *ip) {
 }
 
 //this will be used in bottom half tasklet
+//TODO: check for existing entries before adding new
 u8 *insert_ip_mac_pair(u8 *ip, u8 *mac) {
 	struct ip_mac_pair *new_pair = kmalloc(sizeof(struct ip_mac_pair), GFP_KERNEL);
 	if(!new_pair)
@@ -163,3 +164,100 @@ struct proc_dir_entry* create_fakearp_dump_entry()
 
 	return new_fakearp_dump_entry;
 }
+
+//convert string IP - MAC pair to bytes - kinda clumsy
+//format x.x.x.x-aa:aa:aa:aa:aa:aa
+int pair_str2bytes(char *str, u8 *ip, u8 *mac ) {
+	int i, j;
+	char num[4];
+
+	for(i=0;i<4;i++) {
+		j=0;
+
+		while(*str <= '9' && *str >= '0' && j < 4)
+			num[j++] = *str++;
+
+		if(j==0) return -1;
+
+		if(*str == '.') {
+			num[j] = '\0';
+			if(kstrtou8(num, 10, ip+i))
+				return -1;
+			str++;
+			continue;
+		}
+
+		if(i == 3 && *str++ == '-') {
+			num[j] = '\0';
+			if(kstrtou8(num, 10, ip+i))
+				return -1;
+		} else
+			return -1;
+	 }
+
+	for(i=0;i<6;i++) {
+		j=0;
+
+		num[0] = *str++;
+		num[1] = *str++;
+		num[2] = '\0';
+		if(i<5 && *str != ':')
+			return -1;
+
+		if(kstrtou8(num, 16, mac+i))
+			return -1;
+
+		str++;
+	}
+
+	return 0;
+}
+
+//proc entry to add one IP-MAC pair
+//
+int open_fakearp_new_pair_entry(struct inode *inode, struct file *file)
+{
+	printk(KERN_DEBUG "inside open function\n");
+	return 0;
+}
+ssize_t write_fakearp_new_pair_entry(struct file *file, const char *buffer, size_t count, loff_t *pos)
+{
+	char pair_str[FAKEARP_IPMAC_STRING_MAX_LEN];
+	u8 ip[4];
+	u8 mac[6];
+
+	printk(KERN_DEBUG "inside write function\n");
+
+	if(copy_from_user(pair_str, buffer, FAKEARP_IPMAC_STRING_MAX_LEN))
+		return -EFAULT;
+
+	printk(KERN_DEBUG "copied from user\n");
+
+	if(pair_str2bytes(pair_str, ip, mac))
+		return -EFAULT;
+
+	printk(KERN_INFO "Adding ip: %pI4 mac: %pM to the list\n", ip, mac);
+
+	insert_ip_mac_pair(ip,mac);
+
+	return count;
+}
+
+const struct file_operations fakearp_new_pair_entry_fops = {
+	.owner = THIS_MODULE,
+	.open = open_fakearp_new_pair_entry,
+	.write = write_fakearp_new_pair_entry
+};
+
+//TODO: I don't think we need this either, just go with proc_create or something
+struct proc_dir_entry* create_fakearp_new_pair_entry()
+{
+	struct proc_dir_entry *new_fakearp_new_pair_entry;
+
+	new_fakearp_new_pair_entry = proc_create("fakearp_new_pair", 0, NULL, &fakearp_new_pair_entry_fops);
+	if(!new_fakearp_new_pair_entry)
+		printk(KERN_ALERT "Unable to create a proc entry to add new IP-MAC pairs to the list");
+
+	return new_fakearp_new_pair_entry;
+}
+
