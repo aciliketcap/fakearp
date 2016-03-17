@@ -59,6 +59,9 @@ struct skb_list_node {
 };
 
 extern struct hlist_head fake_mac_list[FAKEARP_HASH_SIZE];
+extern const struct seq_operations fakearp_dump_seq_ops;
+extern const struct file_operations fakearp_dump_entry_fops;
+extern const struct file_operations fakearp_new_pair_entry_fops;
 
 struct net_device *fakedev = 0;	//TODO: this should be placed into priv section as a list to allow multiple devices
 struct net_device_ops fakedev_ndo;
@@ -448,10 +451,14 @@ int fakeARP_init_module(void) {
 		return ret;
 	}
 
-	tmp_priv->fakearp_dump_entry = create_fakearp_dump_entry();
+	tmp_priv->fakearp_dump_entry = proc_create("fakearp_dump", 0, NULL, &fakearp_dump_entry_fops);
+	if(!tmp_priv->fakearp_dump_entry)
+		printk(KERN_ALERT "Unable to create a proc entry to dump IP-MAC list of fakearp");
 
-	printk(KERN_DEBUG "add new proc entry for new pairs\n");
-	tmp_priv->fakearp_new_pair_entry = create_fakearp_new_pair_entry();
+	tmp_priv->fakearp_new_pair_entry = proc_create("fakearp_new_pair", 0, NULL, &fakearp_new_pair_entry_fops);
+	if(!tmp_priv->fakearp_new_pair_entry)
+		printk(KERN_ALERT "Unable to create a proc entry to add new IP-MAC pairs to the list");
+
 
 	return ret;
 }

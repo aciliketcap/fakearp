@@ -151,20 +151,6 @@ const struct file_operations fakearp_dump_entry_fops = {
 	.release = seq_release
 };
 
-//TODO: I don't think we need this either, just go with proc_create or something
-struct proc_dir_entry* create_fakearp_dump_entry()
-{
-	struct proc_dir_entry *new_fakearp_dump_entry;
-
-	new_fakearp_dump_entry = proc_create("fakearp_dump", 0, NULL, &fakearp_dump_entry_fops);
-	if(!new_fakearp_dump_entry)
-	{
-		printk(KERN_ALERT "Unable to create a proc entry to dump IP-MAC list of fakearp");
-	}
-
-	return new_fakearp_dump_entry;
-}
-
 //convert string IP - MAC pair to bytes - kinda clumsy
 //format x.x.x.x-aa:aa:aa:aa:aa:aa
 int pair_str2bytes(char *str, u8 *ip, u8 *mac ) {
@@ -220,6 +206,7 @@ int open_fakearp_new_pair_entry(struct inode *inode, struct file *file)
 	printk(KERN_DEBUG "inside open function\n");
 	return 0;
 }
+
 ssize_t write_fakearp_new_pair_entry(struct file *file, const char *buffer, size_t count, loff_t *pos)
 {
 	char pair_str[FAKEARP_IPMAC_STRING_MAX_LEN];
@@ -248,16 +235,3 @@ const struct file_operations fakearp_new_pair_entry_fops = {
 	.open = open_fakearp_new_pair_entry,
 	.write = write_fakearp_new_pair_entry
 };
-
-//TODO: I don't think we need this either, just go with proc_create or something
-struct proc_dir_entry* create_fakearp_new_pair_entry()
-{
-	struct proc_dir_entry *new_fakearp_new_pair_entry;
-
-	new_fakearp_new_pair_entry = proc_create("fakearp_new_pair", 0, NULL, &fakearp_new_pair_entry_fops);
-	if(!new_fakearp_new_pair_entry)
-		printk(KERN_ALERT "Unable to create a proc entry to add new IP-MAC pairs to the list");
-
-	return new_fakearp_new_pair_entry;
-}
-

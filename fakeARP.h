@@ -58,17 +58,21 @@ void dump_ip_list(void);
 //TODO: these proc entry functionalities will be trasferred to sysfs and netlink later
 
 //proc entry to dump IP - MAC pairs
-struct proc_dir_entry* create_fakearp_dump_entry(void);
-
 void *start_fakearp_dump(struct seq_file *file, loff_t *pos);
 void *next_fakearp_dump(struct seq_file *file, void *cur_it, loff_t *pos);
 void stop_fakearp_dump(struct seq_file *file, void *cur_it);
 int show_fakearp_dump(struct seq_file *file, void *cur_it);
 
+extern const struct seq_operations fakearp_dump_seq_ops;
+
 int show_fakearp_dump_entry(struct seq_file *file, void *seq);
 int open_fakearp_dump_entry(struct inode *inode, struct file *file);
 int close_fakearp_dump_entry(struct inode *inode, struct file *file);
 
+extern const struct file_operations fakearp_dump_entry_fops;
+
 //proc entry to add new IP - MAC pairs
-struct proc_dir_entry* create_fakearp_new_pair_entry(void);
+int open_fakearp_new_pair_entry(struct inode *inode, struct file *file);
 ssize_t write_fakearp_new_pair_entry(struct file *file, const char *buffer, size_t count, loff_t *pos);
+
+extern const struct file_operations fakearp_new_pair_entry_fops;
