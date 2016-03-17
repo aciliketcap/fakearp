@@ -62,7 +62,7 @@ u8 *get_mac(u8 *ip) {
 			if(memcmp(tmp->ip, ip, 4)) { //proceed to next one if cmp fails
 				continue;
 			} else {
-				spin_lock(&fake_mac_list_protector);
+				spin_unlock(&fake_mac_list_protector);
 				return tmp->mac;
 			}
 		}
