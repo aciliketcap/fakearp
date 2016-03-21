@@ -1,14 +1,14 @@
 #!/bin/bash
-# open multiple basic tests simultaneously
+# open multiple basic tests simultaneously to test concurrency
 
-./test-multi-ip-manual.scr 10.10 1 5 1 255 6 &
-./test-multi-ip-manual.scr 10.10 6 20 1 255 4 &
-./test-multi-ip-manual.scr 10.10 21 60 1 255 2 &
-./test-multi-ip-manual.scr 10.10 60 120 1 255 0 &
+./test-multi-ip-manual.scr 10.10 1 5 1 20 6 &
+./test-multi-ip-manual.scr 10.10 6 20 1 20 4 &
+./test-multi-ip-manual.scr 10.10 21 60 1 20 2 &
+./test-multi-ip-manual.scr 10.10 60 120 1 20 0 &
 
-for j in $(seq 1 10); do
-	for i in $(seq 1 1000); do
-		cat /proc/fakearp_dump
-	done
+for i in $(seq 1 120); do
+	cat /proc/fakearp_dump > test_dump
 	sleep 1
 done
+
+rm test_dump

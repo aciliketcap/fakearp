@@ -13,8 +13,8 @@
 //#define FAKEARP_EXTRA_DEBUG
 #define debug_hex_dump(obj,len)	print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, obj, len, true);
 //enable logs and facilities for debugging concurrency issue, race conditions etc.
-#define FAKEARP_CONCURRENT_DEBUG
-//TODO: let's make these macro print cpu number, jiffies, task pid etc. later
+//#define FAKEARP_CONCURRENT_DEBUG
+//TODO: let's make these macro print cpu jiffies, task pid etc. later
 #ifdef FAKEARP_CONCURRENT_DEBUG
 #define FAKEARP_CONC_DEBUG_WAIT(LOCK) printk(KERN_DEBUG "WAITING to take " #LOCK " c%d l-%d %s %s\n", smp_processor_id(), __LINE__, __FUNCTION__, __FILE__);
 #define FAKEARP_CONC_DEBUG_TRY(LOCK) printk(KERN_DEBUG "TRYING to take " #LOCK " c%d l-%d %s %s\n", smp_processor_id(), __LINE__, __FUNCTION__, __FILE__);
