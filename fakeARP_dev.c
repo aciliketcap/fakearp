@@ -292,6 +292,7 @@ FAKEARP_CONC_DEBUG_UNLOCK(incoming_queue_protector);
 	napi_schedule(&tmp_priv->napi); //tell napi system we may have received packets and it should poll our device some time.
 
 	printk(KERN_DEBUG "napi scheduled, waiting for poller to take the fake ARP reply\n");
+	netif_start_queue(fakedev); //restart tx queue if it was disabled in hard_start_xmit because of us
 
 	return;   //success
 }
@@ -363,6 +364,7 @@ FAKEARP_CONC_DEBUG_UNLOCK(incoming_queue_protector);
 			tasklet_schedule(&forge_fake_reply);
 		} else {
 			//queue is being used by the tasklet or another interrupt
+			netif_stop_queue(dev); //do not attempt to send the packet back to me
 			goto busy;
 		}
 	}
