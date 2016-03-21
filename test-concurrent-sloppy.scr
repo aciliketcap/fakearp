@@ -1,0 +1,14 @@
+#!/bin/bash
+# open multiple basic tests simultaneously
+
+./test-multi-ip-manual.scr 10.10 1 5 1 255 6 &
+./test-multi-ip-manual.scr 10.10 6 20 1 255 4 &
+./test-multi-ip-manual.scr 10.10 21 60 1 255 2 &
+./test-multi-ip-manual.scr 10.10 60 120 1 255 0 &
+
+for j in $(seq 1 10); do
+	for i in $(seq 1 1000); do
+		cat /proc/fakearp_dump
+	done
+	sleep 1
+done

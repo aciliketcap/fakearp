@@ -7,10 +7,25 @@
 #include <linux/u64_stats_sync.h> //to sync 64bit per-cpu variables on 32bit archs
 #include <asm/uaccess.h> //copy_to_user, copy_from_user userspace access functions
 
+//I'd make these config options if I wasn't compiling in my own directory
+//TODO: maybe I can still find a way?
 //extra debugging which just dumps lots of lines to show how stuff works
-//I'd make this config option if I wasn't compiling in my own directory
 //#define FAKEARP_EXTRA_DEBUG
 #define debug_hex_dump(obj,len)	print_hex_dump(KERN_DEBUG, ":", 1, 16, 1, obj, len, true);
+//enable logs and facilities for debugging concurrency issue, race conditions etc.
+#define FAKEARP_CONCURRENT_DEBUG
+//TODO: let's make these macro print cpu number, jiffies, task pid etc. later
+#ifdef FAKEARP_CONCURRENT_DEBUG
+#define FAKEARP_CONC_DEBUG_WAIT(LOCK) printk(KERN_DEBUG "WAITING to take " #LOCK " c%d l-%d %s %s\n", smp_processor_id(), __LINE__, __FUNCTION__, __FILE__);
+#define FAKEARP_CONC_DEBUG_TRY(LOCK) printk(KERN_DEBUG "TRYING to take " #LOCK " c%d l-%d %s %s\n", smp_processor_id(), __LINE__, __FUNCTION__, __FILE__);
+#define FAKEARP_CONC_DEBUG_LOCKED(LOCK) printk(KERN_DEBUG "LOCKED " #LOCK " c%d l-%d %s %s\n", smp_processor_id(), __LINE__, __FUNCTION__, __FILE__);
+#define FAKEARP_CONC_DEBUG_UNLOCK(LOCK) printk(KERN_DEBUG "UNLOCKED " #LOCK " c%d l-%d %s %s\n", smp_processor_id(), __LINE__, __FUNCTION__,  __FILE__);
+#else
+#define FAKEARP_CONC_DEBUG_WAIT(LOCK)
+#define FAKEARP_CONC_DEBUG_TRY(LOCK)
+#define FAKEARP_CONC_DEBUG_LOCKED(LOCK)
+#define FAKEARP_CONC_DEBUG_UNLOCK(LOCK)
+#endif
 
 #ifdef FAKEARP_EXTRA_DEBUG
 struct rtnl_link_stats64 *fakeARP_get_stats64_extra_debug(struct net_device *dev, struct rtnl_link_stats64 *total_stats);

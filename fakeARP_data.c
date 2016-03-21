@@ -21,10 +21,12 @@ u8 *insert_ip_mac_pair(u8 *ip, u8 *mac) {
 
 	memcpy(new_pair->ip, ip, 4);
 	memcpy(new_pair->mac, mac, 6);
-
+FAKEARP_CONC_DEBUG_WAIT(fake_mac_list_protector)
 	spin_lock(&fake_mac_list_protector);
+FAKEARP_CONC_DEBUG_LOCKED(fake_mac_list_protector)
 	hlist_add_head(&new_pair->mac_list, hash_fake_mac_list(ip));
 	spin_unlock(&fake_mac_list_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(fake_mac_list_protector)
 
 	return new_pair->mac;
 }
@@ -49,7 +51,9 @@ u8 *insert_new_ip_mac_pair(u8 *ip) {
 u8 *get_mac(u8 *ip) {
 	struct ip_mac_pair *tmp;
 
+FAKEARP_CONC_DEBUG_WAIT(fake_mac_list_protector)
 	spin_lock(&fake_mac_list_protector);
+FAKEARP_CONC_DEBUG_LOCKED(fake_mac_list_protector)
 	if(hlist_empty(hash_fake_mac_list(ip))) {
 		goto no_mac;
 	} else {
@@ -63,6 +67,7 @@ u8 *get_mac(u8 *ip) {
 				continue;
 			} else {
 				spin_unlock(&fake_mac_list_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(fake_mac_list_protector)
 				return tmp->mac;
 			}
 		}
@@ -71,6 +76,7 @@ u8 *get_mac(u8 *ip) {
 no_mac:
 	printk(KERN_DEBUG "No MAC recorded for IP %pI4 before\n", ip);
 	spin_unlock(&fake_mac_list_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(fake_mac_list_protector)
 	return 0;
 }
 
@@ -84,7 +90,9 @@ void *start_fakearp_dump(struct seq_file *file, loff_t *pos)
 			return NULL;
 		//assign initial pos
 		*spos = *pos;
+FAKEARP_CONC_DEBUG_WAIT(fake_mac_list_protector)
 		spin_lock(&fake_mac_list_protector); //lock here, unlock at stop
+FAKEARP_CONC_DEBUG_LOCKED(fake_mac_list_protector)
 		return spos;
 	} else
 		return NULL;
@@ -103,6 +111,7 @@ void *next_fakearp_dump(struct seq_file *file, void *cur_it, loff_t *pos)
 
 void stop_fakearp_dump(struct seq_file *file, void *cur_it) {
 	spin_unlock(&fake_mac_list_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(fake_mac_list_protector)
 	kfree(cur_it);
 }
 

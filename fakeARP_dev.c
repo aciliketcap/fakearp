@@ -150,7 +150,9 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 	//please don't preempt me while I use a pointer specific to this cpu
 	tc_stats = get_cpu_ptr(fakedev->lstats);
 
+FAKEARP_CONC_DEBUG_WAIT(outgoing_queue_protector);
 	spin_lock(&tmp_priv->outgoing_queue_protector);
+FAKEARP_CONC_DEBUG_LOCKED(outgoing_queue_protector);
 
 	list_for_each_entry_safe(outgoing_skb, next_skb, &tmp_priv->outgoing_queue.node, node) 	{
 		if(budget > 0) {
@@ -182,6 +184,7 @@ int fakeARP_poll(struct napi_struct *napi, int budget) {
 	}
 
 	spin_unlock(&tmp_priv->outgoing_queue_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(outgoing_queue_protector);
 
 	put_cpu_ptr(fakedev->lstats);
 
@@ -207,7 +210,9 @@ void fakeARP(unsigned long noparam) {
 
 	u8 *my_mac;
 
+FAKEARP_CONC_DEBUG_WAIT(incoming_queue_protector);
 	spin_lock(&tmp_priv->incoming_queue_protector);
+FAKEARP_CONC_DEBUG_LOCKED(incoming_queue_protector);
 
 	//process the list of arp requests
 	list_for_each_entry_safe(incoming_skb_node, next_skb, &tmp_priv->incoming_queue.node, node) {
@@ -269,9 +274,12 @@ void fakeARP(unsigned long noparam) {
 		__net_timestamp(outgoing_skb_node->skb); //as if we just got it fresh, without a timestamp
 
 		//TODO: can this cause a deadlock somehow?
+FAKEARP_CONC_DEBUG_WAIT(outgoing_queue_protector);
 		spin_lock(&tmp_priv->outgoing_queue_protector);
+FAKEARP_CONC_DEBUG_LOCKED(outgoing_queue_protector);
 		list_add_tail(&outgoing_skb_node->node, &tmp_priv->outgoing_queue.node);
 		spin_unlock(&tmp_priv->outgoing_queue_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(outgoing_queue_protector);
 
 		//we are done with the incoming skb
 		kfree(incoming_skb_node->skb);
@@ -279,6 +287,7 @@ void fakeARP(unsigned long noparam) {
 	}
 
 	spin_unlock(&tmp_priv->incoming_queue_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(incoming_queue_protector);
 
 	napi_schedule(&tmp_priv->napi); //tell napi system we may have received packets and it should poll our device some time.
 
@@ -307,6 +316,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 	struct skb_list_node *incoming_skb_node;
 	struct pcpu_lstats *tc_stats; //this cpu's stats
 	struct fake_priv *tmp_priv = netdev_priv(fakedev);
+	struct sk_buff *incoming_skb;
 
 	//please don't preempt me while I use a pointer specific to this cpu
 	tc_stats = get_cpu_ptr(fakedev->lstats);
@@ -322,12 +332,15 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 
 	if(is_ARP_request(data)) {
 		//try to add skb to the list
+FAKEARP_CONC_DEBUG_TRY(incoming_queue_protector);
 		if(spin_trylock(&tmp_priv->incoming_queue_protector)) {
+FAKEARP_CONC_DEBUG_LOCKED(incoming_queue_protector);
 
-			struct sk_buff *incoming_skb = skb_clone(skb, GFP_ATOMIC);
+			incoming_skb = skb_clone(skb, GFP_ATOMIC);
 			if(!incoming_skb) {
 				printk(KERN_CRIT "failed to clone skb for forging\n");
 				spin_unlock(&tmp_priv->incoming_queue_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(incoming_queue_protector);
 				goto busy; //if cloning fails give the packet back
 			}
 
@@ -335,6 +348,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 			if(!incoming_skb_node) {
 				printk(KERN_CRIT "failed to clone list node for forging\n");
 				spin_unlock(&tmp_priv->incoming_queue_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(incoming_queue_protector);
 				goto busy; //if allocation fails give the packet back
 			}
 
@@ -343,6 +357,7 @@ netdev_tx_t fakeARP_tx(struct sk_buff *skb, struct net_device *dev) {
 
 			list_add_tail(&incoming_skb_node->node, &(tmp_priv->incoming_queue.node)); //add to the end of list
 			spin_unlock(&tmp_priv->incoming_queue_protector);
+FAKEARP_CONC_DEBUG_UNLOCK(incoming_queue_protector);
 
 			//forger tasklet will take care of the rest
 			tasklet_schedule(&forge_fake_reply);
