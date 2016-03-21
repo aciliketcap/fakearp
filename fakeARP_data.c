@@ -83,16 +83,15 @@ FAKEARP_CONC_DEBUG_UNLOCK(fake_mac_list_protector)
 //use a proc entry to dump hash table entries
 void *start_fakearp_dump(struct seq_file *file, loff_t *pos)
 {
-	//alloc iterator
+FAKEARP_CONC_DEBUG_WAIT(fake_mac_list_protector)
+	spin_lock(&fake_mac_list_protector); //lock here, unlock at stop
+FAKEARP_CONC_DEBUG_LOCKED(fake_mac_list_protector)
 	if(*pos < FAKEARP_HASH_SIZE) {
 		loff_t *spos = kmalloc(sizeof(loff_t), GFP_KERNEL);
 		if (!spos)
 			return NULL;
 		//assign initial pos
 		*spos = *pos;
-FAKEARP_CONC_DEBUG_WAIT(fake_mac_list_protector)
-		spin_lock(&fake_mac_list_protector); //lock here, unlock at stop
-FAKEARP_CONC_DEBUG_LOCKED(fake_mac_list_protector)
 		return spos;
 	} else
 		return NULL;
@@ -105,14 +104,16 @@ void *next_fakearp_dump(struct seq_file *file, void *cur_it, loff_t *pos)
 	if(*spos < FAKEARP_HASH_SIZE) {
 		*pos = ++*spos;
 		return spos;
-	} else
+	} else {
+		//we can't pass the allocated iterator to stop func easily
+		kfree(spos); //so let's free it here
 		return NULL;
+	}
 }
 
 void stop_fakearp_dump(struct seq_file *file, void *cur_it) {
 	spin_unlock(&fake_mac_list_protector);
 FAKEARP_CONC_DEBUG_UNLOCK(fake_mac_list_protector)
-	kfree(cur_it);
 }
 
 int show_fakearp_dump(struct seq_file *file, void *cur_it) {
