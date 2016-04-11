@@ -1,0 +1,7 @@
+#!/bin/bash
+# open multiple basic tests simultaneously 2
+
+./test-multi-ip-manual.scr 10.10 1 2 1 5 3 &
+./test-multi-ip-manual.scr 10.10 3 5 1 5 2 &
+./test-multi-ip-manual.scr 10.10 5 10 1 5 1 &
+./test-multi-ip-manual.scr 10.10 11 60 1 5 0 &
